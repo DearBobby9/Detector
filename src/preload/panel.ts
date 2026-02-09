@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import { DetectionResult } from '@shared/types'
+import { AppSettings, DetectionResult } from '@shared/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onShowLoading: (callback: () => void) => {
@@ -32,5 +32,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   panelReady: () => {
     ipcRenderer.send(IPC.PANEL_READY)
+  },
+
+  getSettings: (): Promise<AppSettings> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_GET)
+  },
+
+  saveSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_SAVE, settings)
+  },
+
+  triggerCapture: (): Promise<{ ok: boolean }> => {
+    return ipcRenderer.invoke(IPC.CAPTURE_TRIGGER)
+  },
+
+  apiTest: (settings?: Partial<AppSettings>): Promise<{ ok: boolean; message: string; latencyMs: number }> => {
+    return ipcRenderer.invoke(IPC.API_TEST, settings)
+  },
+
+  getHistory: () => {
+    return ipcRenderer.invoke(IPC.HISTORY_LIST)
+  },
+
+  chatSend: (payload: { contextText: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }) => {
+    return ipcRenderer.invoke(IPC.CHAT_SEND, payload)
   }
 })

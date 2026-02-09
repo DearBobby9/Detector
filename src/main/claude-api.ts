@@ -1,6 +1,5 @@
 import { ActiveWindowInfo, DetectionResult, ScreenCapture } from '@shared/types'
-
-const DEFAULT_API_TIMEOUT_MS = 30000
+import { getSettings } from './settings'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -8,14 +7,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
-
-function getTimeoutMs(): number {
-  const rawTimeout = Number(process.env.API_TIMEOUT_MS)
-  if (Number.isFinite(rawTimeout) && rawTimeout > 0) {
-    return Math.floor(rawTimeout)
-  }
-  return DEFAULT_API_TIMEOUT_MS
 }
 
 function parseDetectionResult(text: string): DetectionResult {
@@ -126,13 +117,14 @@ export async function callClaude(
   screenshots: ScreenCapture[],
   activeWindow: ActiveWindowInfo
 ): Promise<DetectionResult> {
-  const apiKey = process.env.API_KEY
-  const baseUrl = process.env.API_BASE_URL || 'https://api.openai.com/v1'
-  const model = process.env.API_MODEL || 'gpt-4o'
-  const timeoutMs = getTimeoutMs()
+  const settings = getSettings()
+  const apiKey = settings.apiKey
+  const baseUrl = settings.apiBaseUrl
+  const model = settings.apiModel
+  const timeoutMs = settings.apiTimeoutMs
 
   if (!apiKey || apiKey === 'your-api-key-here') {
-    throw new Error('API_KEY not set. Please add your API key to the .env file.')
+    throw new Error('API key not set. Open Detector settings and configure API key.')
   }
 
   console.log('[API] Calling', baseUrl, 'model:', model, 'with', screenshots.length, 'screenshot(s)')

@@ -9,6 +9,19 @@ const BLUR_HIDE_GRACE_MS = 300
 let panelWindow: BrowserWindow | null = null
 let lastShownAt = 0
 
+function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    const url = new URL(process.env['ELECTRON_RENDERER_URL'])
+    url.searchParams.set('view', view)
+    window.loadURL(url.toString())
+    return
+  }
+
+  window.loadFile(join(__dirname, '../renderer/index.html'), {
+    query: { view }
+  })
+}
+
 export function createPanelWindow(): BrowserWindow {
   panelWindow = new BrowserWindow({
     width: PANEL_WIDTH,
@@ -37,11 +50,7 @@ export function createPanelWindow(): BrowserWindow {
   })
 
   // Load the renderer
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    panelWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    panelWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  loadRenderer(panelWindow, 'panel')
 
   // Hide when losing focus
   panelWindow.on('blur', () => {

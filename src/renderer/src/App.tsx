@@ -1,7 +1,16 @@
 import { Panel } from './components/Panel'
+import { MainAppShell } from './components/MainAppShell'
 import { usePanel } from './hooks/usePanel'
 
-function App() {
+interface Props {
+  view: 'panel' | 'app'
+}
+
+function App({ view }: Props) {
+  if (view === 'app') {
+    return <MainAppShell />
+  }
+
   const { state, dismiss, copyToClipboard } = usePanel()
 
   return (

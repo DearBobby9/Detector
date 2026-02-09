@@ -49,12 +49,24 @@
   border-color: hsl(var(--border));
 }
 
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
 html, body {
   margin: 0;
   padding: 0;
-  background: transparent;
   overflow: hidden;
   -webkit-app-region: no-drag;
+}
+
+body[data-view="panel"] {
+  background: transparent;
+}
+
+body[data-view="app"] {
+  background: #020617;
 }
 
 body {

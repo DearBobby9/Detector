@@ -34,4 +34,19 @@ export interface HistoryRecord {
   windowTitle: string
   resultType: string
   resultJson: string
+  resultText?: string
+}
+
+export interface AppSettings {
+  apiBaseUrl: string
+  apiKey: string
+  apiModel: string
+  apiTimeoutMs: number
+}
+
+export type ChatRole = 'user' | 'assistant'
+
+export interface ChatMessage {
+  role: ChatRole
+  content: string
 }
