@@ -397,9 +397,6 @@ export function MainAppShell() {
                       <div className="text-[13px] font-medium text-slate-700 truncate">
                         {getRecordTitle(record)}
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5 truncate">
-                        {formatTime(record.timestamp)}
-                      </div>
                     </button>
                   )
                 })}
@@ -760,4 +757,3 @@ export function MainAppShell() {
     </div>
   )
 }
-
