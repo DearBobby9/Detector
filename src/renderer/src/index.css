@@ -58,7 +58,6 @@ html, body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  -webkit-app-region: no-drag;
 }
 
 body[data-view="panel"] {
@@ -66,10 +65,19 @@ body[data-view="panel"] {
 }
 
 body[data-view="app"] {
-  background: #020617;
+  background: #f3f5f7;
+  color-scheme: light;
 }
 
 body {
   color: hsl(var(--foreground));
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-nodrag {
+  -webkit-app-region: no-drag;
 }
