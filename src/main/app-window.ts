@@ -32,7 +32,7 @@ export function createAppWindow(): BrowserWindow {
     title: 'Detector',
     trafficLightPosition: { x: 16, y: 16 },
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
-    backgroundColor: '#f3f5f7',
+    backgroundColor: '#f2f5f8',
     webPreferences: {
       preload: join(__dirname, '../preload/panel.js'),
       sandbox: false

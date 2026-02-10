@@ -22,6 +22,7 @@ export function PageSummary({ data, onCopy, onDismiss }: Props) {
         <button
           onClick={onDismiss}
           className="p-1 rounded-md hover:bg-white/10 transition-colors"
+          aria-label="Dismiss"
         >
           <X className="h-4 w-4 text-muted-foreground" />
         </button>
@@ -46,7 +47,7 @@ export function PageSummary({ data, onCopy, onDismiss }: Props) {
 
       <button
         onClick={() => onCopy(fullText)}
-        className="flex items-center justify-center gap-2 w-full py-2 px-4 rounded-lg bg-white/10 hover:bg-white/15 text-sm font-medium transition-colors"
+        className="flex items-center justify-center gap-2 w-full py-2 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium transition-colors"
       >
         <Copy className="h-4 w-4" />
         Copy Summary

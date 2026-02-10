@@ -65,6 +65,27 @@ npm install
 npm run dev
 ```
 
+## Browser UI Preview (no Electron preload)
+
+The renderer supports a browser-only preview mode for fast UI iteration and agent-browser screenshots.
+
+1. Start dev server:
+
+```bash
+npm run dev
+```
+
+2. Open the app view in a regular browser:
+
+```text
+http://localhost:5173/?view=app
+```
+
+In browser preview mode (no Electron preload), `window.electronAPI` is automatically mocked:
+
+- `src/renderer/src/main.tsx`
+- `src/renderer/src/lib/mockElectronApi.ts`
+
 Build:
 
 ```bash
@@ -72,6 +93,16 @@ npm run build
 ```
 
 ## Package macOS App (without downloading Electron again)
+
+One-command rebuild + relaunch (recommended):
+
+```bash
+npm run rebuild:mac
+# Or tail packaged app logs:
+# npm run rebuild:mac -- --tail
+```
+
+Manual (build + package):
 
 ```bash
 npm run build
@@ -136,10 +167,13 @@ Note:
 ## Main Window + Settings
 
 - Open from menu bar icon
-- `Main` tab:
-  - Trigger `Capture Now`
-  - Select a capture, then chat with the saved context
-- `Settings` tab:
+- Main window:
+  - Left sidebar: Captures list (scroll inside the rounded card; resizable with the middle divider)
+  - Top toolbar: Home / Search / New chat / Capture (Cmd+Shift+.)
+  - Bottom-left `...` menu: hover to reveal actions
+- Chat:
+  - Screen context section is expanded by default
+- Settings:
   - `API Base URL`
   - `API Key`
   - `Model`

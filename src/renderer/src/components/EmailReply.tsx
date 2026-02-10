@@ -18,6 +18,7 @@ export function EmailReply({ data, onCopy, onDismiss }: Props) {
         <button
           onClick={onDismiss}
           className="p-1 rounded-md hover:bg-white/10 transition-colors"
+          aria-label="Dismiss"
         >
           <X className="h-4 w-4 text-muted-foreground" />
         </button>
