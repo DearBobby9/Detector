@@ -1,7 +1,8 @@
 import type { ElectronAPI } from './types'
-import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord } from '@shared/types'
+import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord, MemoryItem } from '@shared/types'
 
 const MOCK_SETTINGS_STORAGE_KEY = 'detector.mockSettings'
+const MOCK_MEMORY_STORAGE_KEY = 'detector.mockMemory'
 
 const DEFAULT_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
@@ -37,6 +38,26 @@ function loadSettings(): AppSettings {
 function saveSettings(settings: AppSettings): void {
   try {
     window.localStorage.setItem(MOCK_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+  } catch {
+    // ignore
+  }
+}
+
+function loadMemory(): MemoryItem[] {
+  try {
+    const raw = window.localStorage.getItem(MOCK_MEMORY_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = safeJsonParse<MemoryItem[]>(raw)
+    if (!parsed) return []
+    return parsed
+  } catch {
+    return []
+  }
+}
+
+function saveMemoryToStorage(items: MemoryItem[]): void {
+  try {
+    window.localStorage.setItem(MOCK_MEMORY_STORAGE_KEY, JSON.stringify(items))
   } catch {
     // ignore
   }
@@ -113,6 +134,8 @@ export function createMockElectronAPI(): ElectronAPI {
   let settings = loadSettings()
   let history = makeMockHistory()
   let nextHistoryId = (history[history.length - 1]?.id ?? 0) + 1
+  let memory = loadMemory()
+  let nextMemoryId = (memory[memory.length - 1]?.id ?? 0) + 1
 
   return {
     onShowLoading: (callback) => {
@@ -155,10 +178,27 @@ export function createMockElectronAPI(): ElectronAPI {
       await sleep(450)
 
       const result: DetectionResult = {
-        type: 'page-summary',
-        title: `Mock Capture ${nextHistoryId}`,
-        summary: 'Mock capture created from browser preview mode.',
-        keyPoints: ['Uses in-browser mock Electron API', 'Helps validate UI quickly']
+        type: 'capture-analysis',
+        screenTitle: `Mock Capture ${nextHistoryId}`,
+        email: { detected: false, confidence: 0.22, evidence: [] },
+        memoryCandidates: [
+          {
+            kind: 'todo',
+            title: 'Follow up on package delivery ETA',
+            details: 'Check tracking page for updated date',
+            dueAt: null,
+            source: 'Tracking: arrives Feb 14',
+            confidence: 0.78
+          },
+          {
+            kind: 'reading',
+            title: 'Finish 3 open papers from the call room',
+            details: 'Save URLs + note key claims',
+            dueAt: null,
+            source: 'Multiple PDF tabs visible',
+            confidence: 0.64
+          }
+        ]
       }
 
       history = [
@@ -167,7 +207,7 @@ export function createMockElectronAPI(): ElectronAPI {
           id: nextHistoryId++,
           timestamp: Date.now(),
           activeApp: 'Browser Preview',
-          windowTitle: result.title,
+          windowTitle: result.screenTitle,
           resultType: result.type,
           resultJson: JSON.stringify(result)
         }
@@ -185,6 +225,19 @@ export function createMockElectronAPI(): ElectronAPI {
     getHistory: async () => {
       return history
     },
+    getMemory: async () => {
+      return memory
+    },
+    saveMemory: async (payload: Omit<MemoryItem, 'id' | 'createdAt'>) => {
+      const item: MemoryItem = {
+        id: nextMemoryId++,
+        createdAt: Date.now(),
+        ...payload
+      }
+      memory = [...memory, item]
+      saveMemoryToStorage(memory)
+      return item
+    },
     chatSend: async (payload: { contextText: string; messages: ChatMessage[] }) => {
       const last = payload.messages[payload.messages.length - 1]?.content ?? ''
       await sleep(280)
@@ -192,4 +245,3 @@ export function createMockElectronAPI(): ElectronAPI {
     }
   }
 }
-

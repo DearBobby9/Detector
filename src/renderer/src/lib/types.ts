@@ -1,4 +1,4 @@
-import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord } from '@shared/types'
+import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord, MemoryItem } from '@shared/types'
 
 export type PanelState =
   | { status: 'hidden' }
@@ -18,6 +18,8 @@ export interface ElectronAPI {
   triggerCapture: () => Promise<{ ok: boolean }>
   apiTest: (settings?: Partial<AppSettings>) => Promise<{ ok: boolean; message: string; latencyMs: number }>
   getHistory: () => Promise<HistoryRecord[]>
+  getMemory: () => Promise<MemoryItem[]>
+  saveMemory: (payload: Omit<MemoryItem, 'id' | 'createdAt'>) => Promise<MemoryItem>
   chatSend: (payload: { contextText: string; messages: ChatMessage[] }) => Promise<{ ok: boolean; text: string }>
 }
 

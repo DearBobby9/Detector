@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import { AppSettings, DetectionResult } from '@shared/types'
+import { AppSettings, DetectionResult, MemoryItem } from '@shared/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onShowLoading: (callback: () => void) => {
@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getHistory: () => {
     return ipcRenderer.invoke(IPC.HISTORY_LIST)
+  },
+
+  getMemory: (): Promise<MemoryItem[]> => {
+    return ipcRenderer.invoke(IPC.MEMORY_LIST)
+  },
+
+  saveMemory: (payload: Omit<MemoryItem, 'id' | 'createdAt'>): Promise<MemoryItem> => {
+    return ipcRenderer.invoke(IPC.MEMORY_SAVE, payload)
   },
 
   chatSend: (payload: { contextText: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }) => {

@@ -10,5 +10,7 @@ export const IPC = {
   CAPTURE_TRIGGER: 'capture:trigger',
   API_TEST: 'api:test',
   HISTORY_LIST: 'history:list',
+  MEMORY_LIST: 'memory:list',
+  MEMORY_SAVE: 'memory:save',
   CHAT_SEND: 'chat:send'
 } as const

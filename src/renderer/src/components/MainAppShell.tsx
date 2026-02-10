@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { AppSettings, ChatMessage, HistoryRecord } from '@shared/types'
+import type { AppSettings, ChatMessage, HistoryRecord, MemoryItem } from '@shared/types'
 import { cn } from '@/lib/utils'
 import {
+  Bookmark,
   ChevronDown,
   Cog,
   Code2,
-  Image as ImageIcon,
   LayoutGrid,
   Loader2,
   MoreHorizontal,
@@ -19,7 +19,7 @@ import {
   X
 } from 'lucide-react'
 
-type Route = 'home' | 'chat' | 'settings'
+type Route = 'home' | 'chat' | 'memory' | 'settings'
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'detector.sidebarWidth'
 const SIDEBAR_DEFAULT_WIDTH_PX = 260
@@ -107,6 +107,43 @@ function getRecordText(record: HistoryRecord): string {
         .join('\n')
         .trim()
     }
+
+    if (parsed?.type === 'capture-analysis') {
+      const screenTitle = typeof parsed.screenTitle === 'string' ? parsed.screenTitle : 'Capture'
+      const lines: string[] = [screenTitle]
+
+      const email = parsed.email && typeof parsed.email === 'object' ? parsed.email : null
+      const emailDetected = Boolean(email && (email as any).detected)
+
+      if (emailDetected) {
+        const subject = typeof (email as any)?.subject === 'string' ? (email as any).subject : ''
+        const originalSender =
+          typeof (email as any)?.originalSender === 'string' ? (email as any).originalSender : ''
+        const draft = typeof (email as any)?.draft === 'string' ? (email as any).draft : ''
+        lines.push('', 'Email reply:')
+        if (subject) lines.push(`Subject: ${subject}`)
+        if (originalSender) lines.push(`To: ${originalSender}`)
+        if (draft) lines.push('', draft)
+      }
+
+      const memoryCandidates = Array.isArray(parsed.memoryCandidates) ? parsed.memoryCandidates : []
+      const memLines = memoryCandidates
+        .map((raw: any) => {
+          if (!raw || typeof raw !== 'object') return null
+          const kind = typeof raw.kind === 'string' ? raw.kind : 'other'
+          const title = typeof raw.title === 'string' ? raw.title : ''
+          const dueAt = typeof raw.dueAt === 'string' ? raw.dueAt : ''
+          if (!title) return null
+          return dueAt ? `- [${kind}] ${title} (due: ${dueAt})` : `- [${kind}] ${title}`
+        })
+        .filter((x: unknown): x is string => typeof x === 'string' && x.length > 0)
+
+      if (memLines.length > 0) {
+        lines.push('', 'Memory candidates:', ...memLines)
+      }
+
+      return lines.join('\n').trim()
+    }
   } catch {
     // ignore
   }
@@ -125,6 +162,26 @@ function getRecordTitle(record: HistoryRecord): string {
 
   if (record.resultType === 'page-summary') {
     return lines[0] || 'Page Summary'
+  }
+
+  if (record.resultType === 'capture-analysis') {
+    // Prefer the screen title, or email subject if present.
+    try {
+      const parsed = JSON.parse(record.resultJson) as any
+      if (parsed?.type === 'capture-analysis') {
+        const email = parsed.email && typeof parsed.email === 'object' ? parsed.email : null
+        const emailDetected = Boolean(email && (email as any).detected)
+        if (emailDetected && typeof (email as any).subject === 'string' && (email as any).subject.trim()) {
+          return String((email as any).subject).trim()
+        }
+        if (typeof parsed.screenTitle === 'string' && parsed.screenTitle.trim()) {
+          return String(parsed.screenTitle).trim()
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return lines[0] || 'Capture'
   }
 
   return lines[0] || record.resultType || 'Capture'
@@ -148,6 +205,9 @@ export function MainAppShell() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [activeRecordId, setActiveRecordId] = useState<number | null>(null)
   const [isCapturing, setIsCapturing] = useState(false)
+
+  const [memory, setMemory] = useState<MemoryItem[]>([])
+  const [isLoadingMemory, setIsLoadingMemory] = useState(true)
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -333,6 +393,22 @@ export function MainAppShell() {
     return null
   }
 
+  const refreshMemory = async (): Promise<void> => {
+    setIsLoadingMemory(true)
+    try {
+      const items = await window.electronAPI.getMemory()
+      setMemory(items)
+    } catch {
+      setStatusMessage('Failed to load memory')
+    } finally {
+      setIsLoadingMemory(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshMemory()
+  }, [])
+
   useEffect(() => {
     void refreshHistory(false)
 
@@ -513,6 +589,14 @@ export function MainAppShell() {
     setStatusMessage(null)
     setSettingsSection(section)
     setRoute('settings')
+  }
+
+  const openMemory = () => {
+    setIsSidebarSearchOpen(false)
+    setSidebarQuery('')
+    setStatusMessage(null)
+    setRoute('memory')
+    void refreshMemory()
   }
 
   const selectRecord = (record: HistoryRecord) => {
@@ -757,10 +841,10 @@ export function MainAppShell() {
                     </button>
                     <button
                       className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
-                      onClick={() => setStatusMessage('Gallery not implemented yet')}
+                      onClick={openMemory}
                     >
-                      <ImageIcon className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Gallery</span>
+                      <Bookmark className="h-4 w-4 text-slate-500 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Memory</span>
                     </button>
                     <button
                       className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
@@ -1056,6 +1140,73 @@ export function MainAppShell() {
                     )}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {route === 'memory' && (
+          <div className="flex-1 min-h-0 flex flex-col px-10 py-12">
+            <div className="mx-auto w-full max-w-4xl min-h-0 flex flex-col">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs text-slate-400">Memory</div>
+                  <div className="text-2xl font-semibold tracking-tight text-slate-800 mt-1">Saved items</div>
+                  <div className="text-sm text-slate-500 mt-1">
+                    Things you chose to remember from your screen captures.
+                  </div>
+                </div>
+                <button
+                  className="app-nodrag h-9 w-9 rounded-xl hover:bg-slate-200/40 text-slate-500 flex items-center justify-center transition"
+                  onClick={showHome}
+                  aria-label="Close memory"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-6 flex-1 min-h-0 overflow-y-auto pr-2 space-y-3">
+                {isLoadingMemory ? (
+                  <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6 text-sm text-slate-500 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading memory...
+                  </div>
+                ) : memory.length === 0 ? (
+                  <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6 text-sm text-slate-500">
+                    No saved memory yet. Use the capture panel to save important items.
+                  </div>
+                ) : (
+                  [...memory]
+                    .slice()
+                    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+                    .map((item) => (
+                      <div
+                        key={item.id ?? `${item.createdAt}-${item.title}`}
+                        className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-5"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-800 truncate">{item.title}</div>
+                            <div className="mt-1 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center rounded-full bg-slate-100 border border-slate-200/70 px-2 py-0.5">
+                                {item.kind}
+                              </span>
+                              {typeof item.dueAt === 'string' && item.dueAt.trim().length > 0 && (
+                                <span className="tabular-nums">Due: {item.dueAt}</span>
+                              )}
+                              <span className="tabular-nums">{formatTime(item.createdAt)}</span>
+                            </div>
+                            {typeof item.details === 'string' && item.details.trim().length > 0 && (
+                              <div className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">{item.details}</div>
+                            )}
+                            {typeof item.source === 'string' && item.source.trim().length > 0 && (
+                              <div className="mt-3 text-xs text-slate-500 whitespace-pre-wrap">{item.source}</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                )}
               </div>
             </div>
           </div>

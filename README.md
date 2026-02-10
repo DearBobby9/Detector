@@ -9,8 +9,8 @@ Detector now runs as a menu bar app:
 
 It sends screenshots to an OpenAI-compatible API and shows either:
 
-- an email reply draft, or
-- a page summary.
+- a conservative email reply draft (only when an email UI is clearly detected), and
+- a short list of actionable **memory candidates** (todos, reminders, deliveries, reading list, etc.) that you can save.
 
 The main window also provides a simple chat UI:
 
@@ -57,6 +57,17 @@ Important:
 
 - `API_BASE_URL` should include `/v1` if your gateway exposes OpenAI-compatible routes under `/v1/chat/completions`.
 - For packaged apps, settings are saved under `~/Library/Application Support/<app>/settings.json` and take precedence.
+
+## Local Data (History + Memory)
+
+In packaged mode, Detector stores JSON files under:
+
+`~/Library/Application Support/detector/`
+
+Files:
+
+- `history.json` - last 100 captures (raw model JSON + a text summary for chat context)
+- `memory.json` - saved memory items you confirmed from the capture panel
 
 ## Development
 
@@ -170,9 +181,11 @@ Note:
 - Main window:
   - Left sidebar: Captures list (scroll inside the rounded card; resizable with the middle divider)
   - Top toolbar: Home / Search / New chat / Capture (Cmd+Shift+.)
-  - Bottom-left `...` menu: hover to reveal actions
+- Bottom-left `...` menu: hover to reveal actions
 - Chat:
   - Screen context section is expanded by default
+- Memory:
+  - Saved items you confirmed from the capture panel
 - Settings:
   - `API Base URL`
   - `API Key`

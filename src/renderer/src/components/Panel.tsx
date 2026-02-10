@@ -4,6 +4,7 @@ import { PanelState } from '@/lib/types'
 import { LoadingState } from './LoadingState'
 import { EmailReply } from './EmailReply'
 import { PageSummary } from './PageSummary'
+import { CaptureAnalysis } from './CaptureAnalysis'
 import { AlertTriangle } from 'lucide-react'
 
 interface Props {
@@ -43,6 +44,10 @@ export function Panel({ state, onDismiss, onCopy }: Props) {
 
             {state.status === 'result' && state.data.type === 'page-summary' && (
               <PageSummary data={state.data} onCopy={onCopy} onDismiss={onDismiss} />
+            )}
+
+            {state.status === 'result' && state.data.type === 'capture-analysis' && (
+              <CaptureAnalysis data={state.data} onCopy={onCopy} onDismiss={onDismiss} />
             )}
 
             {state.status === 'error' && (

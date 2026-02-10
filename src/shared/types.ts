@@ -25,7 +25,58 @@ export interface PageSummaryResult {
   keyPoints: string[]
 }
 
-export type DetectionResult = EmailReplyResult | PageSummaryResult
+export type MemoryCandidateKind =
+  | 'todo'
+  | 'reminder'
+  | 'delivery'
+  | 'reading'
+  | 'follow-up'
+  | 'finance'
+  | 'event'
+  | 'note'
+  | 'link'
+  | 'other'
+
+export interface MemoryCandidate {
+  kind: MemoryCandidateKind
+  title: string
+  details?: string
+  dueAt?: string | null // ISO 8601, null if unknown
+  source?: string
+  confidence: number // 0..1
+}
+
+export interface CaptureEmailDraft {
+  detected: boolean
+  confidence: number // 0..1
+  evidence: string[]
+  subject?: string
+  originalSender?: string
+  draft?: string
+}
+
+export interface CaptureAnalysisResult {
+  type: 'capture-analysis'
+  screenTitle: string
+  email: CaptureEmailDraft
+  memoryCandidates: MemoryCandidate[]
+}
+
+export type DetectionResult = EmailReplyResult | PageSummaryResult | CaptureAnalysisResult
+
+export interface MemoryItem {
+  id?: number
+  createdAt: number
+  kind: MemoryCandidateKind
+  title: string
+  details?: string
+  dueAt?: string | null
+  source?: string
+  captureId?: number
+  activeApp?: string
+  windowTitle?: string
+  url?: string
+}
 
 export interface HistoryRecord {
   id?: number

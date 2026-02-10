@@ -17,6 +17,10 @@ config({ path: join(__dirname, '../../.env') })
 
 let isProcessing = false
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
@@ -67,6 +71,60 @@ async function orchestrateCapture(): Promise<void> {
     // Call Claude API
     console.log('[Main] Calling Claude API...')
     const result = await callClaude(screenshots, activeWindow)
+
+    // Conservative email gating to reduce false positives when the active app isn't an email client.
+    if (result.type === 'capture-analysis' && result.email?.detected) {
+      const app = String(activeWindow.appName || '').toLowerCase()
+      const url = typeof activeWindow.url === 'string' ? activeWindow.url : ''
+      const host = (() => {
+        try {
+          return url ? new URL(url).host.toLowerCase() : ''
+        } catch {
+          return ''
+        }
+      })()
+
+      const isMailApp =
+        app.includes('mail') ||
+        app.includes('outlook') ||
+        app.includes('spark') ||
+        app.includes('mimestream') ||
+        app.includes('airmail')
+
+      const isWebMailHost =
+        host.includes('mail.google.com') ||
+        host.includes('gmail.com') ||
+        host.includes('outlook.office.com') ||
+        host.includes('office.com') ||
+        host.includes('mail.yahoo.com') ||
+        host.includes('mail.proton.me') ||
+        host.includes('proton.me')
+
+      const env: 'mail' | 'webmail' | 'unknown' | 'other' =
+        isMailApp ? 'mail' : isWebMailHost ? 'webmail' : app === 'unknown' ? 'unknown' : 'other'
+
+      const confidence = typeof result.email.confidence === 'number' ? result.email.confidence : 0
+      const evidenceCount = Array.isArray(result.email.evidence) ? result.email.evidence.length : 0
+      const hasRequiredFields =
+        typeof result.email.subject === 'string' &&
+        result.email.subject.trim().length > 0 &&
+        typeof result.email.originalSender === 'string' &&
+        result.email.originalSender.trim().length > 0 &&
+        typeof result.email.draft === 'string' &&
+        result.email.draft.trim().length > 0
+
+      const threshold = env === 'mail' || env === 'webmail' ? 0.55 : env === 'unknown' ? 0.88 : 0.94
+
+      const accepted = confidence >= threshold && evidenceCount >= 2 && hasRequiredFields
+      if (!accepted) {
+        console.log('[Main] Email gated off:', { env, confidence, evidenceCount, hasRequiredFields, threshold })
+        result.email = {
+          detected: false,
+          confidence,
+          evidence: Array.isArray(result.email.evidence) ? result.email.evidence : []
+        }
+      }
+    }
 
     // Send result to renderer
     broadcastToRenderers(IPC.PANEL_SHOW_RESULT, result)
@@ -122,6 +180,42 @@ function formatResultText(result: { type: string } & Record<string, unknown>): s
     return [title, '', summary, ...(keyLines.length > 0 ? ['', 'Key points:', ...keyLines] : [])]
       .filter((x) => typeof x === 'string' && x.length > 0)
       .join('\n')
+  }
+
+  if (result.type === 'capture-analysis') {
+    const screenTitle = typeof result.screenTitle === 'string' ? result.screenTitle : 'Capture'
+    const lines: string[] = [screenTitle]
+
+    const email = isRecord(result.email) ? result.email : null
+    const emailDetected = Boolean(email && email.detected)
+
+    if (emailDetected) {
+      const subject = typeof email?.subject === 'string' ? email.subject : ''
+      const originalSender = typeof email?.originalSender === 'string' ? email.originalSender : ''
+      const draft = typeof email?.draft === 'string' ? email.draft : ''
+      lines.push('', 'Email reply:')
+      if (subject) lines.push(`Subject: ${subject}`)
+      if (originalSender) lines.push(`To: ${originalSender}`)
+      if (draft) lines.push('', draft)
+    }
+
+    const memoryCandidates = Array.isArray(result.memoryCandidates) ? (result.memoryCandidates as unknown[]) : []
+    const memLines = memoryCandidates
+      .map((raw) => {
+        if (!isRecord(raw)) return null
+        const kind = typeof raw.kind === 'string' ? raw.kind : 'other'
+        const title = typeof raw.title === 'string' ? raw.title : ''
+        const dueAt = typeof raw.dueAt === 'string' ? raw.dueAt : ''
+        if (!title) return null
+        return dueAt ? `- [${kind}] ${title} (due: ${dueAt})` : `- [${kind}] ${title}`
+      })
+      .filter((x): x is string => typeof x === 'string' && x.length > 0)
+
+    if (memLines.length > 0) {
+      lines.push('', 'Memory candidates:', ...memLines)
+    }
+
+    return lines.join('\n').trim()
   }
 
   return JSON.stringify(result)

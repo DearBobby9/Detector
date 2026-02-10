@@ -9,6 +9,13 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
+function normalizeConfidence(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  if (value >= 0 && value <= 1) return value
+  if (value >= 1 && value <= 100) return value / 100
+  return Math.max(0, Math.min(1, value))
+}
+
 function parseDetectionResult(text: string): DetectionResult {
   // Parse JSON from response (handle potential markdown code blocks)
   let jsonStr = text.trim()
@@ -64,6 +71,77 @@ function parseDetectionResult(text: string): DetectionResult {
     }
   }
 
+  if (parsed.type === 'capture-analysis') {
+    if (typeof parsed.screenTitle !== 'string') {
+      throw new Error('Invalid capture-analysis payload: expected screenTitle to be a string')
+    }
+
+    if (!isRecord(parsed.email)) {
+      throw new Error('Invalid capture-analysis payload: expected email to be an object')
+    }
+
+    const detected = Boolean(parsed.email.detected)
+    const emailConfidence = normalizeConfidence(parsed.email.confidence)
+    const evidence = isStringArray(parsed.email.evidence) ? parsed.email.evidence : []
+
+    const subject = typeof parsed.email.subject === 'string' ? parsed.email.subject : undefined
+    const originalSender =
+      typeof parsed.email.originalSender === 'string' ? parsed.email.originalSender : undefined
+    const draft = typeof parsed.email.draft === 'string' ? parsed.email.draft : undefined
+
+    const memoryCandidatesRaw = Array.isArray(parsed.memoryCandidates)
+      ? (parsed.memoryCandidates as unknown[])
+      : []
+
+    const allowedKinds = new Set([
+      'todo',
+      'reminder',
+      'delivery',
+      'reading',
+      'follow-up',
+      'finance',
+      'event',
+      'note',
+      'link',
+      'other'
+    ])
+
+    const memoryCandidates = memoryCandidatesRaw
+      .map((raw): any => {
+        if (!isRecord(raw)) return null
+        const kind = typeof raw.kind === 'string' && allowedKinds.has(raw.kind) ? raw.kind : 'other'
+        const title = typeof raw.title === 'string' ? raw.title : null
+        if (!title) return null
+
+        const details = typeof raw.details === 'string' ? raw.details : undefined
+        const dueAt =
+          raw.dueAt === null || raw.dueAt === undefined
+            ? raw.dueAt
+            : typeof raw.dueAt === 'string'
+              ? raw.dueAt
+              : undefined
+        const source = typeof raw.source === 'string' ? raw.source : undefined
+        const confidence = normalizeConfidence(raw.confidence)
+
+        return { kind, title, details, dueAt, source, confidence }
+      })
+      .filter(Boolean)
+
+    return {
+      type: 'capture-analysis',
+      screenTitle: parsed.screenTitle,
+      email: {
+        detected,
+        confidence: emailConfidence,
+        evidence,
+        subject,
+        originalSender,
+        draft
+      },
+      memoryCandidates
+    }
+  }
+
   throw new Error(`Unexpected result type: ${String(parsed.type)}`)
 }
 
@@ -76,42 +154,52 @@ function isAbortError(error: unknown): boolean {
   )
 }
 
-const SYSTEM_PROMPT = `You are a screen understanding assistant. You analyze screenshots of a user's desktop to provide helpful actions.
+const SYSTEM_PROMPT = `You are a macOS screen understanding assistant.
+
+You will receive:
+- One or more desktop screenshots
+- Active window info (app name, window title, and sometimes URL)
 
 Your job:
-1. Look at the screenshots and active window info
-2. Determine if the user is viewing an email (any email client or webmail like Gmail, Outlook, etc.)
-3. If it's an email: generate a professional reply draft
-4. If it's not an email: provide a concise summary of what's on screen
+1) Identify whether the user is currently viewing an email (email client/webmail).
+2) If and only if it is clearly an email: draft a professional reply.
+3) Extract a short list of actionable "memory candidates" from what is visible on screen (todos, reminders, deliveries, papers to read, etc.).
 
-IMPORTANT: Respond ONLY with valid JSON in one of these two formats:
+Be conservative:
+- Set email.detected=false unless you see clear email UI cues AND recognizable email details (sender/subject/email address).
+- Do NOT invent facts that are not visible.
 
-For email reply:
+IMPORTANT: Respond ONLY with valid JSON in exactly this format:
+
 {
-  "type": "email-reply",
-  "subject": "Re: <original subject>",
-  "draft": "<your reply draft>",
-  "originalSender": "<sender name or email>"
+  "type": "capture-analysis",
+  "screenTitle": "<short descriptive title of what's on screen>",
+  "email": {
+    "detected": true,
+    "confidence": 0.0,
+    "evidence": ["<short evidence strings>"],
+    "subject": "Re: <original subject>",
+    "originalSender": "<sender name or email>",
+    "draft": "<reply draft, <= 150 words>"
+  },
+  "memoryCandidates": [
+    {
+      "kind": "todo|reminder|delivery|reading|follow-up|finance|event|note|link|other",
+      "title": "<short title>",
+      "details": "<optional details>",
+      "dueAt": "2026-02-10T20:00:00Z",
+      "source": "<optional snippet/evidence from screen>",
+      "confidence": 0.0
+    }
+  ]
 }
 
-For page summary:
-{
-  "type": "page-summary",
-  "title": "<descriptive title of what's on screen>",
-  "summary": "<2-3 sentence summary>",
-  "keyPoints": ["point 1", "point 2", "point 3"]
-}
-
-Guidelines for email replies:
-- Be professional and concise
-- Match the tone of the original email
-- Address the key points raised
-- Keep it under 150 words
-
-Guidelines for page summaries:
-- Focus on the most visible/important content
-- Include 3-5 key points
-- Be concise and informative`
+Rules:
+- If email.detected is false, omit subject/originalSender/draft or set them to empty strings.
+- confidence fields must be 0..1.
+- memoryCandidates must be 0-6 items and must be actionable.
+- dueAt must be an ISO 8601 string if provided, otherwise null.
+`
 
 export async function callClaude(
   screenshots: ScreenCapture[],

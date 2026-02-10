@@ -4,6 +4,7 @@ import { AppSettings, ChatMessage } from '@shared/types'
 import { hidePanel } from './panel-window'
 import { getSettings, saveSettings } from './settings'
 import { getHistory } from './database'
+import { listMemory, saveMemory } from './memory-database'
 import { apiTest, sendChat } from './chat-api'
 
 interface IpcHandlerActions {
@@ -44,6 +45,17 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
 
   ipcMain.handle(IPC.HISTORY_LIST, () => {
     return getHistory()
+  })
+
+  ipcMain.handle(IPC.MEMORY_LIST, () => {
+    return listMemory()
+  })
+
+  ipcMain.handle(IPC.MEMORY_SAVE, (_event, payload: Omit<import('@shared/types').MemoryItem, 'id' | 'createdAt'>) => {
+    return saveMemory({
+      createdAt: Date.now(),
+      ...payload
+    })
   })
 
   ipcMain.handle(
