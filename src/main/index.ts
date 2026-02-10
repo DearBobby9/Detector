@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { config } from 'dotenv'
 import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
-import { createPanelWindow, getPanelWindow, showPanel } from './panel-window'
+import { createPanelWindow, getPanelWindow, resizePanel, showPanel } from './panel-window'
 import { registerIpcHandlers } from './ipc-handlers'
 import { registerHotkey, unregisterHotkey } from './hotkey'
 import { captureAllScreens } from './screenshot'
@@ -48,7 +48,7 @@ async function orchestrateCapture(): Promise<void> {
 
   try {
     // Show loading state immediately
-    showPanel()
+    showPanel('collapsed')
     broadcastToRenderers(IPC.PANEL_SHOW_LOADING)
 
     // Capture screenshots and active window in parallel
@@ -127,6 +127,7 @@ async function orchestrateCapture(): Promise<void> {
     }
 
     // Send result to renderer
+    resizePanel('expanded')
     broadcastToRenderers(IPC.PANEL_SHOW_RESULT, result)
 
     // Save to history

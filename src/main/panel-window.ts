@@ -2,12 +2,23 @@ import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
-const PANEL_WIDTH = 480
-const PANEL_HEIGHT = 400
+const PANEL_WIDTH = 460
+const PANEL_HEIGHT_COLLAPSED = 112
+const PANEL_HEIGHT_EXPANDED = 360
 const BLUR_HIDE_GRACE_MS = 300
 
 let panelWindow: BrowserWindow | null = null
 let lastShownAt = 0
+let lastMode: PanelMode = 'collapsed'
+
+type PanelMode = 'collapsed' | 'expanded'
+
+function getModeSize(mode: PanelMode): { width: number; height: number } {
+  return {
+    width: PANEL_WIDTH,
+    height: mode === 'collapsed' ? PANEL_HEIGHT_COLLAPSED : PANEL_HEIGHT_EXPANDED
+  }
+}
 
 function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -25,7 +36,7 @@ function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
 export function createPanelWindow(): BrowserWindow {
   panelWindow = new BrowserWindow({
     width: PANEL_WIDTH,
-    height: PANEL_HEIGHT,
+    height: PANEL_HEIGHT_COLLAPSED,
     show: false,
     frame: false,
     transparent: true,
@@ -72,7 +83,7 @@ export function getPanelWindow(): BrowserWindow | null {
   return panelWindow
 }
 
-export function showPanel(): void {
+export function showPanel(mode: PanelMode = 'expanded'): void {
   if (!panelWindow) return
 
   // Position at top-center of the screen where the cursor is
@@ -80,13 +91,31 @@ export function showPanel(): void {
   const display = screen.getDisplayNearestPoint(cursorPoint)
   const { x, y, width } = display.workArea
 
-  const panelX = Math.round(x + (width - PANEL_WIDTH) / 2)
+  const size = getModeSize(mode)
+  const panelX = Math.round(x + (width - size.width) / 2)
   const panelY = y
 
-  panelWindow.setBounds({ x: panelX, y: panelY, width: PANEL_WIDTH, height: PANEL_HEIGHT })
+  panelWindow.setBounds({ x: panelX, y: panelY, width: size.width, height: size.height })
   lastShownAt = Date.now()
+  lastMode = mode
   panelWindow.showInactive()
   console.log('[PanelWindow] Shown at', panelX, panelY)
+}
+
+export function resizePanel(mode: PanelMode): void {
+  if (!panelWindow) return
+
+  // Keep center anchored so the panel doesn't "jump" if the cursor moves during capture.
+  const prev = panelWindow.getBounds()
+  const size = getModeSize(mode)
+  const nextX = Math.round(prev.x + (prev.width - size.width) / 2)
+
+  panelWindow.setBounds({ x: nextX, y: prev.y, width: size.width, height: size.height })
+  lastMode = mode
+}
+
+export function getPanelMode(): PanelMode {
+  return lastMode
 }
 
 export function hidePanel(): void {
