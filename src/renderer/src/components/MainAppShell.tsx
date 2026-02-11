@@ -458,12 +458,14 @@ export function MainAppShell() {
     }
   }
 
-  const refreshStorageUsage = async (showLoading = true): Promise<void> => {
+  const refreshStorageUsage = async (showLoading = true, syncLimitInput = true): Promise<void> => {
     if (showLoading) setIsLoadingStorage(true)
     try {
       const usage = await window.electronAPI.getStorageUsage()
       setStorageUsage(usage)
-      setStorageLimitMbInput(bytesToMb(usage.maxBytes))
+      if (syncLimitInput) {
+        setStorageLimitMbInput(bytesToMb(usage.maxBytes))
+      }
     } catch {
       setStatusMessage('Failed to load storage usage')
     } finally {
@@ -495,7 +497,7 @@ export function MainAppShell() {
     setStatusMessage(null)
     try {
       const result = await window.electronAPI.enforceStorageLimit()
-      await refreshStorageUsage(false)
+      await refreshStorageUsage(false, true)
       if (result.reclaimedBytes > 0 || result.deletedRecords > 0) {
         setStatusMessage(
           `Cleanup reclaimed ${formatBytes(result.reclaimedBytes)} (${result.deletedRecords} capture${result.deletedRecords === 1 ? '' : 's'} removed)`
@@ -541,7 +543,7 @@ export function MainAppShell() {
     void refreshStorageUsage()
 
     const timer = window.setInterval(() => {
-      void refreshStorageUsage(false)
+      void refreshStorageUsage(false, false)
     }, 8000)
 
     return () => {
