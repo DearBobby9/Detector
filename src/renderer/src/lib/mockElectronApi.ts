@@ -123,6 +123,67 @@ function makeMockHistory(): HistoryRecord[] {
     records.push(mk(id++, 60 * 24 + 60 * 2 + i * 35, titles[(i + 3) % titles.length]!))
   }
 
+  // Add a recent "capture-analysis" record with richer metadata so app UI can be previewed
+  // in a regular browser (no Electron capture required).
+  const chromeTabs = Array.from({ length: 20 }).map((_, idx) => {
+    const n = idx + 1
+    const domain =
+      n % 5 === 0
+        ? 'arxiv.org'
+        : n % 5 === 1
+          ? 'mail.google.com'
+          : n % 5 === 2
+            ? 'github.com'
+            : n % 5 === 3
+              ? 'docs.openai.com'
+              : 'news.ycombinator.com'
+    return {
+      title: `Tab ${n}: Research / Notes / Docs`,
+      url: `https://${domain}/example/${n}`
+    }
+  })
+
+  const capturePayload: DetectionResult = {
+    type: 'capture-analysis',
+    screenTitle: 'Chrome session (tab metadata)',
+    email: { detected: false, confidence: 0.12, evidence: [] },
+    memoryCandidates: [
+      {
+        kind: 'reading',
+        title: 'Save 3 papers to finish later',
+        details: 'Capture tabs: identify unfinished papers and add a short note.',
+        dueAt: null,
+        source: 'Browser tabs',
+        confidence: 0.66
+      },
+      {
+        kind: 'todo',
+        title: 'Reply to one pending email',
+        details: 'Draft reply with the captured context.',
+        dueAt: null,
+        source: 'Mail tab',
+        confidence: 0.58
+      }
+    ],
+    // Non-typed, UI-only payload for demo screenshots.
+    metadata: {
+      activeApp: 'Google Chrome',
+      windowTitle: 'Quorum (20 tabs)',
+      activeUrl: 'https://quorum.example.com/call-room',
+      tabs: chromeTabs,
+      capturedAt: now - 2 * 60 * 1000
+    } as any
+  } as any
+
+  records.push({
+    id: id++,
+    timestamp: now - 2 * 60 * 1000,
+    activeApp: 'Google Chrome',
+    windowTitle: 'Quorum (20 tabs)',
+    resultType: capturePayload.type,
+    resultJson: JSON.stringify(capturePayload)
+  })
+
   return records.sort((a, b) => a.timestamp - b.timestamp)
 }
 
@@ -189,6 +250,35 @@ export function createMockElectronAPI(): ElectronAPI {
             dueAt: null,
             source: 'Tracking: arrives Feb 14',
             confidence: 0.78
+          },
+          {
+            kind: 'reading',
+            title: 'Reading list (Chrome tabs: 20)',
+            details: [
+              '- Quotaio model ID list and evaluation notes',
+              '- How to handle current issue (debug checklist)',
+              '- Read Claude code settings docs',
+              '- GitHub CLI configuration update guide',
+              '- Linux multi-account proxy setup',
+              '- macOS .gar.tz decryption walkthrough',
+              '- News research: competitive analysis',
+              '- Project research requirements draft',
+              '- NVIDIA API model validity benchmark',
+              '- Electron app debugging session recap',
+              '- Electron + Vite multi-window patterns',
+              '- Unity 6 VR/AR development environment',
+              '- Screen & system audio recording tips',
+              '- Split screen: live football match pipeline',
+              '- Split screen: live sports streaming notes',
+              '- WebAgent: google-search integration',
+              '- Webfetch constraints and caching strategy',
+              '- Reading list: papers from call room',
+              '- Follow-up: delivery tracking for new purchase',
+              '- Detector UI refinements and sidebar hierarchy'
+            ].join('\n'),
+            dueAt: null,
+            source: 'Google Chrome',
+            confidence: 0.87
           },
           {
             kind: 'reading',

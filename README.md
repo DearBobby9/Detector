@@ -184,6 +184,7 @@ Note:
 - Bottom-left `...` menu: hover to reveal actions
 - Chat:
   - Screen context section is expanded by default
+  - Context uses **raw metadata first** (active app/window/url/tabs), then falls back to model output text when needed
 - Memory:
   - Saved items you confirmed from the capture panel
 - Settings:
@@ -199,3 +200,10 @@ Note:
 - `API error: 404`: usually `API_BASE_URL` path mismatch. Check whether `/v1` is required.
 - `Screen Recording permission is denied`: enable permission in System Settings, then relaunch app.
 - No popup on full-screen app: ensure you are testing the latest packaged build.
+
+## UI Notes (Panel)
+
+The capture panel (top overlay) has two modes:
+
+- Collapsed: slim loading bar (`Analyzing your screen...`)
+- Expanded: full result view (email draft + memory candidates)

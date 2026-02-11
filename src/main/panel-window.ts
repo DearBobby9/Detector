@@ -2,9 +2,14 @@ import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
-const PANEL_WIDTH = 460
-const PANEL_HEIGHT_COLLAPSED = 112
+// Panel size rules:
+// - Loading ("collapsed") should be a slim bar near the top.
+// - Result ("expanded") can be larger to fit email draft + memory candidates.
+const PANEL_WIDTH_COLLAPSED = 380
+const PANEL_HEIGHT_COLLAPSED = 72
+const PANEL_WIDTH_EXPANDED = 460
 const PANEL_HEIGHT_EXPANDED = 360
+const PANEL_TOP_OFFSET_PX = 12
 const BLUR_HIDE_GRACE_MS = 300
 
 let panelWindow: BrowserWindow | null = null
@@ -14,10 +19,10 @@ let lastMode: PanelMode = 'collapsed'
 type PanelMode = 'collapsed' | 'expanded'
 
 function getModeSize(mode: PanelMode): { width: number; height: number } {
-  return {
-    width: PANEL_WIDTH,
-    height: mode === 'collapsed' ? PANEL_HEIGHT_COLLAPSED : PANEL_HEIGHT_EXPANDED
+  if (mode === 'collapsed') {
+    return { width: PANEL_WIDTH_COLLAPSED, height: PANEL_HEIGHT_COLLAPSED }
   }
+  return { width: PANEL_WIDTH_EXPANDED, height: PANEL_HEIGHT_EXPANDED }
 }
 
 function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
@@ -35,7 +40,7 @@ function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
 
 export function createPanelWindow(): BrowserWindow {
   panelWindow = new BrowserWindow({
-    width: PANEL_WIDTH,
+    width: PANEL_WIDTH_COLLAPSED,
     height: PANEL_HEIGHT_COLLAPSED,
     show: false,
     frame: false,
@@ -93,7 +98,7 @@ export function showPanel(mode: PanelMode = 'expanded'): void {
 
   const size = getModeSize(mode)
   const panelX = Math.round(x + (width - size.width) / 2)
-  const panelY = y
+  const panelY = y + PANEL_TOP_OFFSET_PX
 
   panelWindow.setBounds({ x: panelX, y: panelY, width: size.width, height: size.height })
   lastShownAt = Date.now()

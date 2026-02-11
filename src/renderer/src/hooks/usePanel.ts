@@ -30,6 +30,14 @@ export function usePanel() {
 
     window.electronAPI.panelReady()
 
+    // Browser preview helper:
+    // `?demo=1` will auto-trigger a mock capture so we can screenshot UI with agent-browser.
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('demo') === '1') {
+      // Slight delay so listeners are registered before mock emits events.
+      setTimeout(() => void window.electronAPI.triggerCapture(), 120)
+    }
+
     return () => cleanups.forEach((fn) => fn())
   }, [])
 

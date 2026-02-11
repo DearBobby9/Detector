@@ -7,8 +7,11 @@ import {
   ChevronDown,
   Cog,
   Code2,
+  Copy,
+  Globe,
   LayoutGrid,
   Loader2,
+  Monitor,
   MoreHorizontal,
   PenSquare,
   Search,
@@ -192,6 +195,9 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 export function MainAppShell() {
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), [])
+  const demoMode = urlParams.get('demo') === '1'
+
   const [route, setRoute] = useState<Route>('home')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
 
@@ -212,6 +218,7 @@ export function MainAppShell() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [isChatting, setIsChatting] = useState(false)
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false)
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
@@ -410,7 +417,14 @@ export function MainAppShell() {
   }, [])
 
   useEffect(() => {
-    void refreshHistory(false)
+    void (async () => {
+      const latest = await refreshHistory(demoMode)
+      if (demoMode && latest) {
+        setChatMessages([])
+        setChatInput('')
+        setRoute('chat')
+      }
+    })()
 
     const cleanups: Array<() => void> = []
 
@@ -499,7 +513,100 @@ export function MainAppShell() {
     return history.find((r) => r.id === activeRecordId) || null
   }, [history, activeRecordId])
 
-  const contextText = useMemo(() => (activeRecord ? getRecordText(activeRecord) : ''), [activeRecord])
+  const activePayload: any | null = useMemo(() => {
+    if (!activeRecord) return null
+    try {
+      return JSON.parse(activeRecord.resultJson) as any
+    } catch {
+      return null
+    }
+  }, [activeRecord])
+
+  const activeMetadata = useMemo(() => {
+    if (!activeRecord) return null
+
+    const metaRaw =
+      activePayload && typeof activePayload === 'object' && !Array.isArray(activePayload)
+        ? (activePayload as any).metadata
+        : null
+
+    const meta =
+      metaRaw && typeof metaRaw === 'object' && !Array.isArray(metaRaw) ? (metaRaw as any) : null
+
+    const activeApp = typeof meta?.activeApp === 'string' ? meta.activeApp : activeRecord.activeApp
+    const windowTitle = typeof meta?.windowTitle === 'string' ? meta.windowTitle : activeRecord.windowTitle
+    const activeUrl = typeof meta?.activeUrl === 'string' ? meta.activeUrl : undefined
+    const capturedAt = typeof meta?.capturedAt === 'number' ? meta.capturedAt : activeRecord.timestamp
+
+    const tabsRaw = Array.isArray(meta?.tabs) ? meta.tabs : []
+    const tabs = tabsRaw
+      .map((t: any) => {
+        const title = typeof t?.title === 'string' ? t.title.trim() : ''
+        const url = typeof t?.url === 'string' ? t.url.trim() : ''
+        return { title, url }
+      })
+      .filter((t: { title: string; url: string }) => t.title.length > 0 || t.url.length > 0)
+
+    return { activeApp, windowTitle, activeUrl, tabs, capturedAt }
+  }, [activeRecord, activePayload])
+
+  const activeMetadataText = useMemo(() => {
+    if (!activeMetadata) return ''
+    const lines: string[] = []
+    lines.push(`Captured: ${formatTime(activeMetadata.capturedAt)}`)
+    lines.push(`Active app: ${activeMetadata.activeApp}`)
+    lines.push(`Window: ${activeMetadata.windowTitle}`)
+    if (activeMetadata.activeUrl) lines.push(`Active URL: ${activeMetadata.activeUrl}`)
+
+    if (activeMetadata.tabs.length > 0) {
+      lines.push('', `Tabs (${activeMetadata.tabs.length}):`)
+      for (const t of activeMetadata.tabs) {
+        const left = t.title ? t.title : '(untitled)'
+        const right = t.url ? ` — ${t.url}` : ''
+        lines.push(`- ${left}${right}`)
+      }
+    }
+
+    return lines.join('\n').trim()
+  }, [activeMetadata])
+
+  const activeUrlHost = useMemo(() => {
+    const url = activeMetadata?.activeUrl
+    if (!url) return ''
+    try {
+      return new URL(url).host
+    } catch {
+      return ''
+    }
+  }, [activeMetadata])
+
+  const activeMemoryCandidates = useMemo(() => {
+    if (!activePayload || typeof activePayload !== 'object' || Array.isArray(activePayload)) return []
+    if (activePayload.type !== 'capture-analysis') return []
+    const raw = Array.isArray((activePayload as any).memoryCandidates) ? (activePayload as any).memoryCandidates : []
+    return raw
+      .map((c: any) => {
+        const kind = typeof c?.kind === 'string' ? c.kind : 'other'
+        const title = typeof c?.title === 'string' ? c.title.trim() : ''
+        const dueAt = typeof c?.dueAt === 'string' ? c.dueAt : null
+        const confidence = typeof c?.confidence === 'number' ? c.confidence : null
+        if (!title) return null
+        return { kind, title, dueAt, confidence }
+      })
+      .filter(Boolean)
+  }, [activePayload])
+
+  const contextText = useMemo(() => {
+    // Prefer raw metadata (app/window/url/tabs) as the primary context so the chat aligns
+    // with the "no summary, keep original context" direction.
+    const parts: string[] = []
+    if (activeMetadataText.trim().length > 0) parts.push(activeMetadataText.trim())
+    if (activeRecord) {
+      const derived = getRecordText(activeRecord).trim()
+      if (derived.length > 0) parts.push(derived)
+    }
+    return parts.join('\n\n').trim()
+  }, [activeMetadataText, activeRecord])
 
   const filteredHistory = useMemo(() => {
     const query = sidebarQuery.trim().toLowerCase()
@@ -828,7 +935,7 @@ export function MainAppShell() {
                   'group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
                 )}
               >
-                <div className="w-full rounded-2xl bg-white/85 border border-slate-200/70 shadow-[0_24px_48px_-24px_rgba(15,23,42,0.35)] backdrop-blur p-2">
+                <div className="w-[220px] rounded-2xl bg-white/85 border border-slate-200/70 shadow-[0_24px_48px_-24px_rgba(15,23,42,0.35)] backdrop-blur p-2">
                   <div className="space-y-1">
                     <button
                       className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
@@ -1246,22 +1353,125 @@ export function MainAppShell() {
 
               <div className="mt-4 flex-1 min-h-0 rounded-3xl bg-white border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
                 <div className="border-b border-slate-200/60 bg-slate-50/60">
-                  <details defaultOpen className="group">
-                    <summary className="app-nodrag list-none cursor-pointer select-none px-4 py-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                        <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
-                        Screen context
+                  <div className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-400">Context</div>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600">
+                            <Monitor className="h-3.5 w-3.5 text-slate-500" />
+                            {activeMetadata ? activeMetadata.activeApp : activeRecord ? activeRecord.activeApp : '—'}
+                          </span>
+                          {activeUrlHost && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600">
+                              <Globe className="h-3.5 w-3.5 text-slate-500" />
+                              {activeUrlHost}
+                            </span>
+                          )}
+                          {activeMetadata && activeMetadata.tabs.length > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600 tabular-nums">
+                              {activeMetadata.tabs.length} tabs
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-xs text-slate-400">
-                        {activeRecord ? formatCompactTime(activeRecord.timestamp) : 'None'}
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <button
+                          onClick={() => setIsContextModalOpen(true)}
+                          disabled={!activeMetadata}
+                          className="app-nodrag inline-flex items-center justify-center rounded-xl bg-white border border-slate-200/70 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => window.electronAPI.clipboardWrite(activeMetadataText || '')}
+                          disabled={!activeMetadataText}
+                          className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/70 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                          title="Copy raw metadata"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Copy
+                        </button>
                       </div>
-                    </summary>
-                    <div className="px-4 pb-4 whitespace-pre-wrap text-sm text-slate-700 max-h-56 overflow-y-auto">
-                      {activeRecord
-                        ? contextText
-                        : 'No screen context selected. Choose a capture from the left sidebar to attach context.'}
                     </div>
-                  </details>
+
+                    {isContextModalOpen && (
+                      <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 py-10">
+                        <button
+                          className="absolute inset-0 bg-slate-900/20"
+                          aria-label="Close"
+                          onClick={() => setIsContextModalOpen(false)}
+                        />
+                        <div className="relative w-full max-w-3xl rounded-3xl bg-white border border-slate-200/70 shadow-2xl overflow-hidden">
+                          <div className="px-4 py-3 border-b border-slate-200/60 bg-slate-50/70 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-xs text-slate-400">Metadata</div>
+                              <div className="text-sm font-semibold text-slate-800 truncate">
+                                {activeMetadata.activeApp} · {activeMetadata.windowTitle}
+                              </div>
+                            </div>
+                            <button
+                              className="app-nodrag h-9 w-9 rounded-xl hover:bg-slate-200/40 text-slate-500 flex items-center justify-center transition"
+                              onClick={() => setIsContextModalOpen(false)}
+                              aria-label="Close metadata"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          <div className="p-4 space-y-4">
+                            <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                              <div className="aspect-[16/9] bg-[radial-gradient(800px_260px_at_35%_35%,rgba(110,143,149,0.20)_0%,rgba(255,255,255,0)_60%),linear-gradient(180deg,rgba(255,255,255,0.70)_0%,rgba(241,245,249,0.95)_100%)] flex items-center justify-center">
+                                <div className="text-center px-6">
+                                  <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
+                                  <div className="mt-2 text-sm font-semibold text-slate-700">Screenshot preview</div>
+                                  <div className="mt-1 text-xs text-slate-500">(Not stored yet)</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4 text-sm text-slate-700 space-y-1">
+                              <div className="tabular-nums">
+                                <span className="text-slate-400">Captured:</span>{' '}
+                                {activeRecord ? formatTime(activeRecord.timestamp) : '—'}
+                              </div>
+                              <div className="break-all">
+                                <span className="text-slate-400">Active URL:</span>{' '}
+                                {activeMetadata.activeUrl ? activeMetadata.activeUrl : '—'}
+                              </div>
+                            </div>
+
+                            {activeMetadata.tabs.length > 0 && (
+                              <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
+                                  <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                    Browser tabs
+                                  </div>
+                                  <div className="text-xs text-slate-400 tabular-nums">
+                                    {activeMetadata.tabs.length}
+                                  </div>
+                                </div>
+                                <div className="max-h-64 overflow-y-auto">
+                                  {activeMetadata.tabs.map((t, idx) => (
+                                    <div
+                                      key={`${idx}-${t.title}-${t.url}`}
+                                      className="px-4 py-2 border-b border-slate-200/50 last:border-b-0 hover:bg-slate-50/60 transition"
+                                    >
+                                      <div className="text-sm font-medium text-slate-800 truncate">
+                                        {t.title || 'Untitled'}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 truncate">{t.url}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">

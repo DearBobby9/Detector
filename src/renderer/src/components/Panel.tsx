@@ -15,6 +15,7 @@ interface Props {
 
 export function Panel({ state, onDismiss, onCopy }: Props) {
   const isVisible = state.status !== 'hidden'
+  const isCompact = state.status === 'loading'
 
   // Esc to dismiss
   useEffect(() => {
@@ -33,9 +34,15 @@ export function Panel({ state, onDismiss, onCopy }: Props) {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '-100%', opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="w-full h-full p-3"
+          className={isCompact ? 'w-full h-full p-2' : 'w-full h-full p-3'}
         >
-          <div className="rounded-2xl bg-[hsl(var(--card))]/80 backdrop-blur-xl border border-white/10 shadow-2xl p-3 h-full flex flex-col overflow-hidden">
+          <div
+            className={
+              isCompact
+                ? 'rounded-xl bg-[hsl(var(--card))]/80 backdrop-blur-xl border border-white/10 shadow-2xl p-2 h-full flex flex-col overflow-hidden'
+                : 'rounded-2xl bg-[hsl(var(--card))]/80 backdrop-blur-xl border border-white/10 shadow-2xl p-3 h-full flex flex-col overflow-hidden'
+            }
+          >
             {state.status === 'loading' && <LoadingState />}
 
             {state.status === 'result' && state.data.type === 'email-reply' && (
