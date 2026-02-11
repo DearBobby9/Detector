@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import type {
   AppSettings,
   ChatMessage,
   HistoryRecord,
   MemoryItem,
+  ThemeMode,
   StorageCategoryUsage,
   StorageUsageSummary
 } from '@shared/types'
@@ -50,8 +52,15 @@ const FALLBACK_SETTINGS: AppSettings = {
   apiKey: '',
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
-  maxStorageBytes: 512 * 1024 * 1024
+  maxStorageBytes: 512 * 1024 * 1024,
+  themeMode: 'light'
 }
+
+const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; label: string; hint: string }> = [
+  { value: 'light', label: 'Day', hint: 'Parchment surface with taupe text' },
+  { value: 'dark', label: 'Night', hint: 'Taupe canvas with warm neutral contrast' },
+  { value: 'system', label: 'System', hint: 'Follow macOS appearance' }
+]
 
 function formatTime(ts: number): string {
   try {
@@ -232,6 +241,11 @@ function clampStorageMb(value: number): number {
   return clampNumber(Math.round(value), MIN_STORAGE_MB, MAX_STORAGE_MB)
 }
 
+function truncateText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value
+  return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
+}
+
 export function MainAppShell() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const demoMode = urlParams.get('demo') === '1'
@@ -268,8 +282,13 @@ export function MainAppShell() {
   const [screenshotDataCache, setScreenshotDataCache] = useState<Record<string, string>>({})
   const [isLoadingScreenshotPreview, setIsLoadingScreenshotPreview] = useState(false)
   const [screenshotPreviewError, setScreenshotPreviewError] = useState<string | null>(null)
+  const [expandedModalCandidateMap, setExpandedModalCandidateMap] = useState<Record<string, boolean>>({})
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
 
   const [isSidebarSearchOpen, setIsSidebarSearchOpen] = useState(false)
   const [sidebarQuery, setSidebarQuery] = useState('')
@@ -280,6 +299,9 @@ export function MainAppShell() {
   const settingsScrollRef = useRef<HTMLDivElement | null>(null)
   const [showSettingsTopFade, setShowSettingsTopFade] = useState(false)
   const [showSettingsBottomFade, setShowSettingsBottomFade] = useState(false)
+  const contextModalScrollRef = useRef<HTMLDivElement | null>(null)
+  const [showContextModalTopFade, setShowContextModalTopFade] = useState(false)
+  const [showContextModalBottomFade, setShowContextModalBottomFade] = useState(false)
 
   const chatEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -303,6 +325,17 @@ export function MainAppShell() {
 
     setShowSettingsTopFade(nextTop)
     setShowSettingsBottomFade(nextBottom)
+  }
+
+  const updateContextModalScrollFades = () => {
+    const el = contextModalScrollRef.current
+    if (!el) return
+
+    const nextTop = el.scrollTop > 0
+    const nextBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+
+    setShowContextModalTopFade(nextTop)
+    setShowContextModalBottomFade(nextBottom)
   }
 
   const getMaxSidebarWidth = (): number => {
@@ -339,6 +372,14 @@ export function MainAppShell() {
       // ignore
     }
   }, [sidebarWidth])
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches)
+    setSystemPrefersDark(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
 
   useEffect(() => {
     const onResize = () => {
@@ -670,7 +711,8 @@ export function MainAppShell() {
       settings.apiKey !== lastSavedSettings.apiKey ||
       settings.apiModel !== lastSavedSettings.apiModel ||
       settings.apiTimeoutMs !== lastSavedSettings.apiTimeoutMs ||
-      settings.maxStorageBytes !== lastSavedSettings.maxStorageBytes
+      settings.maxStorageBytes !== lastSavedSettings.maxStorageBytes ||
+      settings.themeMode !== lastSavedSettings.themeMode
     )
   }, [
     lastSavedSettings.apiBaseUrl,
@@ -678,12 +720,26 @@ export function MainAppShell() {
     lastSavedSettings.apiModel,
     lastSavedSettings.apiTimeoutMs,
     lastSavedSettings.maxStorageBytes,
+    lastSavedSettings.themeMode,
     settings.apiBaseUrl,
     settings.apiKey,
     settings.apiModel,
     settings.apiTimeoutMs,
-    settings.maxStorageBytes
+    settings.maxStorageBytes,
+    settings.themeMode
   ])
+
+  const resolvedThemeMode: Exclude<ThemeMode, 'system'> =
+    settings.themeMode === 'system' ? (systemPrefersDark ? 'dark' : 'light') : settings.themeMode
+
+  useEffect(() => {
+    document.body.dataset.themeMode = resolvedThemeMode
+    document.documentElement.classList.toggle('dark', resolvedThemeMode === 'dark')
+    return () => {
+      delete document.body.dataset.themeMode
+      document.documentElement.classList.remove('dark')
+    }
+  }, [resolvedThemeMode])
 
   const activeRecord: HistoryRecord | null = useMemo(() => {
     if (history.length === 0) return null
@@ -745,11 +801,33 @@ export function MainAppShell() {
 
   const contextModalEnabled = Boolean(activeRecord)
 
+  const activeMemoryCandidates = useMemo(() => {
+    if (!activePayload || typeof activePayload !== 'object' || Array.isArray(activePayload)) return []
+    if (activePayload.type !== 'capture-analysis') return []
+    const raw = Array.isArray((activePayload as any).memoryCandidates) ? (activePayload as any).memoryCandidates : []
+    return raw
+      .map((c: any) => {
+        const kind = typeof c?.kind === 'string' ? c.kind : 'other'
+        const title = typeof c?.title === 'string' ? c.title.trim() : ''
+        const dueAt = typeof c?.dueAt === 'string' ? c.dueAt : null
+        const confidence = typeof c?.confidence === 'number' ? c.confidence : null
+        const details = typeof c?.details === 'string' ? c.details.trim() : ''
+        const source = typeof c?.source === 'string' ? c.source.trim() : ''
+        if (!title) return null
+        return { kind, title, dueAt, confidence, details, source }
+      })
+      .filter(Boolean)
+  }, [activePayload])
+
   useEffect(() => {
     if (!isContextModalOpen) return
     setSelectedScreenshotIndex(0)
     setScreenshotPreviewError(null)
   }, [isContextModalOpen, activeRecord?.id])
+
+  useEffect(() => {
+    setExpandedModalCandidateMap({})
+  }, [activeRecord?.id])
 
   useEffect(() => {
     if (activeScreenshots.length === 0) {
@@ -803,6 +881,40 @@ export function MainAppShell() {
     }
   }, [isContextModalOpen, selectedScreenshotPath, selectedScreenshotDataUrl])
 
+  useEffect(() => {
+    if (!isContextModalOpen) {
+      setShowContextModalTopFade(false)
+      setShowContextModalBottomFade(false)
+      return
+    }
+    updateContextModalScrollFades()
+  }, [
+    isContextModalOpen,
+    activeRecord?.id,
+    activeScreenshots.length,
+    selectedScreenshotIndex,
+    selectedScreenshotDataUrl,
+    isLoadingScreenshotPreview,
+    activeMemoryCandidates.length,
+    activeMetadata?.tabs.length
+  ])
+
+  useEffect(() => {
+    if (!isContextModalOpen) return
+    const el = contextModalScrollRef.current
+    if (!el) return
+
+    const onScroll = () => updateContextModalScrollFades()
+    onScroll()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [isContextModalOpen, activeRecord?.id])
+
   const activeMetadataText = useMemo(() => {
     if (!activeMetadata) return ''
     const lines: string[] = []
@@ -833,21 +945,55 @@ export function MainAppShell() {
     }
   }, [activeMetadata])
 
-  const activeMemoryCandidates = useMemo(() => {
-    if (!activePayload || typeof activePayload !== 'object' || Array.isArray(activePayload)) return []
-    if (activePayload.type !== 'capture-analysis') return []
-    const raw = Array.isArray((activePayload as any).memoryCandidates) ? (activePayload as any).memoryCandidates : []
-    return raw
-      .map((c: any) => {
-        const kind = typeof c?.kind === 'string' ? c.kind : 'other'
-        const title = typeof c?.title === 'string' ? c.title.trim() : ''
-        const dueAt = typeof c?.dueAt === 'string' ? c.dueAt : null
-        const confidence = typeof c?.confidence === 'number' ? c.confidence : null
-        if (!title) return null
-        return { kind, title, dueAt, confidence }
+  const activeSummaryText = useMemo(() => {
+    if (!activeRecord) return ''
+
+    if (activePayload?.type === 'page-summary') {
+      const summary = typeof activePayload.summary === 'string' ? activePayload.summary.trim() : ''
+      if (summary) return summary
+    }
+
+    if (activePayload?.type === 'capture-analysis') {
+      const payloadSummaryCandidates = [
+        (activePayload as any).summary,
+        (activePayload as any).overview,
+        (activePayload as any).briefSummary
+      ]
+      for (const candidate of payloadSummaryCandidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return candidate.trim()
+        }
+      }
+
+      const lines = getRecordText(activeRecord)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const screenTitle = typeof (activePayload as any).screenTitle === 'string' ? String((activePayload as any).screenTitle).trim() : ''
+      const filtered = lines.filter((line, index) => {
+        if (index === 0 && screenTitle && line === screenTitle) return false
+        if (/^email reply:$/i.test(line) || /^memory candidates:$/i.test(line)) return false
+        if (/^- \[[a-z-]+\]/i.test(line)) return false
+        return true
       })
+      if (filtered.length > 0) {
+        return filtered.slice(0, 4).join(' ')
+      }
+
+      const metaParts: string[] = []
+      if (screenTitle) metaParts.push(screenTitle)
+      if (activeMetadata?.activeApp) metaParts.push(`App: ${activeMetadata.activeApp}`)
+      if (activeMetadata?.tabs?.length) metaParts.push(`${activeMetadata.tabs.length} tabs visible`)
+      if (activeMemoryCandidates.length > 0) metaParts.push(`${activeMemoryCandidates.length} candidates extracted`)
+      return metaParts.join(' • ')
+    }
+
+    const fallback = getRecordText(activeRecord)
+      .split('\n')
+      .map((line) => line.trim())
       .filter(Boolean)
-  }, [activePayload])
+    return fallback.slice(0, 4).join(' ')
+  }, [activeRecord, activePayload, activeMetadata, activeMemoryCandidates.length])
 
   const contextText = useMemo(() => {
     // Prefer raw metadata (app/window/url/tabs) as the primary context so the chat aligns
@@ -892,10 +1038,10 @@ export function MainAppShell() {
     storagePercent > 100 ? 'danger' : storagePercent >= 80 ? 'warning' : 'normal'
   const storageProgressClass =
     storageTone === 'danger'
-      ? 'bg-rose-500'
+      ? 'bg-[var(--ui-progress-danger)]'
       : storageTone === 'warning'
-        ? 'bg-amber-500'
-        : 'bg-[#6e8f95]'
+        ? 'bg-[var(--ui-progress-warning)]'
+        : 'bg-[var(--ui-progress-normal)]'
 
   const storageCategories: StorageCategoryUsage[] = storageUsage?.categories ?? []
 
@@ -1011,10 +1157,10 @@ export function MainAppShell() {
 
   return (
     <div
-      className="h-full w-full min-h-0 grid text-slate-800 overflow-hidden bg-[radial-gradient(900px_600px_at_65%_35%,#ffffff_0%,#f2f5f8_55%,#eef2f6_100%)]"
+      className="app-shell-background h-full w-full min-h-0 grid text-[var(--ui-text)] overflow-hidden"
       style={{ gridTemplateColumns: `${sidebarWidth}px ${SIDEBAR_RESIZER_WIDTH_PX}px 1fr`, gridTemplateRows: '1fr' }}
     >
-      <aside className="bg-[#f7f9fc] flex flex-col relative min-w-0 min-h-0 overflow-hidden">
+      <aside className="app-sidebar flex flex-col relative min-w-0 min-h-0 overflow-hidden">
         <div className="h-12 flex items-center gap-2 px-3 pl-16 app-drag">
           <button
             className="app-nodrag h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-200/50 flex items-center justify-center transition"
@@ -1158,7 +1304,7 @@ export function MainAppShell() {
                                   onClick={() => selectRecord(record)}
                                   className={cn(
                                     'app-nodrag w-full text-left rounded-lg px-2 py-1.5 transition relative',
-                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25',
+                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]',
                                     isActive ? 'bg-white/90' : 'bg-transparent hover:bg-white/70'
                                   )}
                                 >
@@ -1171,7 +1317,7 @@ export function MainAppShell() {
                                     </div>
                                   </div>
                                   {isActive && (
-                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-[#6e8f95]" />
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-[var(--ui-accent)]" />
                                   )}
                                 </button>
                               )
@@ -1185,14 +1331,14 @@ export function MainAppShell() {
 
                 <div
                   className={cn(
-                    'pointer-events-none absolute left-0 right-0 top-0 h-7 bg-gradient-to-b from-white/90 to-transparent',
+                    'app-scroll-fade app-scroll-fade-top pointer-events-none absolute left-0 right-0 top-0 h-7',
                     'transition-opacity duration-200 ease-out motion-reduce:transition-none',
                     showSidebarTopFade ? 'opacity-100' : 'opacity-0'
                   )}
                 />
                 <div
                   className={cn(
-                    'pointer-events-none absolute left-0 right-0 bottom-0 h-7 bg-gradient-to-t from-white/90 to-transparent',
+                    'app-scroll-fade app-scroll-fade-bottom pointer-events-none absolute left-0 right-0 bottom-0 h-7',
                     'transition-opacity duration-200 ease-out motion-reduce:transition-none',
                     showSidebarBottomFade ? 'opacity-100' : 'opacity-0'
                   )}
@@ -1213,10 +1359,10 @@ export function MainAppShell() {
                   'group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
                 )}
               >
-                <div className="w-[220px] rounded-2xl bg-white/85 border border-slate-200/70 shadow-[0_24px_48px_-24px_rgba(15,23,42,0.35)] backdrop-blur p-2">
+                <div className="w-[220px] rounded-2xl bg-white/80 border border-slate-200/70 shadow-2xl backdrop-blur p-2">
                   <div className="space-y-1">
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={() => setStatusMessage('Manage Prompt Apps not implemented yet')}
                     >
                       <SlidersHorizontal className="h-4 w-4 text-slate-500 shrink-0" />
@@ -1225,21 +1371,21 @@ export function MainAppShell() {
                       </span>
                     </button>
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={openMemory}
                     >
                       <Bookmark className="h-4 w-4 text-slate-500 shrink-0" />
                       <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Memory</span>
                     </button>
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={() => setStatusMessage('Live Coding not implemented yet')}
                     >
                       <Code2 className="h-4 w-4 text-slate-500 shrink-0" />
                       <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Live Coding</span>
                     </button>
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={() => openSettings('general')}
                     >
                       <SettingsIcon className="h-4 w-4 text-slate-500 shrink-0" />
@@ -1247,11 +1393,11 @@ export function MainAppShell() {
                     </button>
                   </div>
 
-                  <div className="my-2 h-px bg-slate-200/70" />
+                  <div className="my-2 h-px bg-white/20" />
 
                   <div className="space-y-1">
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={() =>
                         setSidebarWidth(clampNumber(SIDEBAR_DEFAULT_WIDTH_PX, SIDEBAR_MIN_WIDTH_PX, getMaxSidebarWidth()))
                       }
@@ -1260,7 +1406,7 @@ export function MainAppShell() {
                       <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Reset width</span>
                     </button>
                     <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/25"
+                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
                       onClick={() => setStatusMessage('Detector v1.0.0')}
                     >
                       <Sparkles className="h-4 w-4 text-slate-500 shrink-0" />
@@ -1284,7 +1430,7 @@ export function MainAppShell() {
 
       <div
         className={cn(
-          'app-nodrag relative cursor-col-resize group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6e8f95]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f2f5f8]',
+          'app-nodrag relative cursor-col-resize group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ui-bg-base)]',
           isResizingSidebar ? 'bg-slate-200/20' : 'hover:bg-slate-200/10'
         )}
         style={{ WebkitAppRegion: 'no-drag' }}
@@ -1335,7 +1481,7 @@ export function MainAppShell() {
               </div>
 
               <button
-                className="app-nodrag mt-2 w-[360px] max-w-full h-12 rounded-xl bg-[#6e8f95] hover:bg-[#628389] text-white text-sm font-medium shadow-sm transition flex items-center justify-center"
+                className="app-nodrag mt-2 w-[360px] max-w-full h-12 rounded-xl bg-[var(--ui-accent)] hover:bg-[var(--ui-accent-hover)] text-[var(--ui-accent-contrast)] text-sm font-medium shadow-sm transition flex items-center justify-center"
                 onClick={startNewChat}
               >
                 New Chat
@@ -1416,7 +1562,7 @@ export function MainAppShell() {
                             <input
                               value={settings.apiModel}
                               onChange={(e) => updateSetting('apiModel', e.target.value)}
-                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
                               placeholder="gpt-4o"
                             />
                           </div>
@@ -1434,8 +1580,40 @@ export function MainAppShell() {
                               step={1000}
                               value={settings.apiTimeoutMs}
                               onChange={(e) => updateSetting('apiTimeoutMs', Number(e.target.value))}
-                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
                             />
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800">Appearance</div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Neutral Elegance palette. Pick Day, Night, or follow your system appearance.
+                          </div>
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {THEME_MODE_OPTIONS.map((option) => {
+                              const active = settings.themeMode === option.value
+                              return (
+                                <button
+                                  key={option.value}
+                                  className={cn(
+                                    'app-nodrag rounded-2xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]',
+                                    active
+                                      ? 'bg-[var(--ui-accent)] text-[var(--ui-accent-contrast)] border-[var(--ui-accent)] shadow-sm'
+                                      : 'bg-white/60 text-slate-700 border-slate-200/70 hover:bg-white/80'
+                                  )}
+                                  onClick={() => updateSetting('themeMode', option.value)}
+                                >
+                                  <div className="text-sm font-semibold">{option.label}</div>
+                                  <div className={cn('mt-0.5 text-xs', active ? 'opacity-85' : 'text-slate-500')}>
+                                    {option.hint}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <div className="mt-3 text-xs text-slate-500">
+                            Active palette: {resolvedThemeMode === 'dark' ? 'Night' : 'Day'}
                           </div>
                         </div>
                       </>
@@ -1456,7 +1634,7 @@ export function MainAppShell() {
                             <input
                               value={settings.apiBaseUrl}
                               onChange={(e) => updateSetting('apiBaseUrl', e.target.value)}
-                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
                               placeholder="https://api.openai.com/v1"
                             />
                           </label>
@@ -1467,7 +1645,7 @@ export function MainAppShell() {
                               type="password"
                               value={settings.apiKey}
                               onChange={(e) => updateSetting('apiKey', e.target.value)}
-                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
                               placeholder="sk-..."
                             />
                           </label>
@@ -1525,10 +1703,10 @@ export function MainAppShell() {
                                   className={cn(
                                     'text-xs font-semibold tabular-nums',
                                     storageTone === 'danger'
-                                      ? 'text-rose-600'
+                                      ? 'text-[var(--ui-progress-danger)]'
                                       : storageTone === 'warning'
-                                        ? 'text-amber-600'
-                                        : 'text-slate-500'
+                                        ? 'text-[var(--ui-progress-warning)]'
+                                        : 'text-[var(--ui-text-muted)]'
                                   )}
                                 >
                                   {storagePercent.toFixed(1)}%
@@ -1559,7 +1737,7 @@ export function MainAppShell() {
                                   step={50}
                                   value={clampStorageMb(storageLimitMbInput)}
                                   onChange={(e) => setStorageLimitMbInput(clampStorageMb(Number(e.target.value)))}
-                                  className="app-nodrag w-full accent-[#6e8f95]"
+                                  className="app-nodrag w-full accent-[var(--ui-accent)]"
                                 />
                                 <div className="flex items-center gap-3">
                                   <div className="relative w-40">
@@ -1572,7 +1750,7 @@ export function MainAppShell() {
                                       onChange={(e) =>
                                         setStorageLimitMbInput(clampStorageMb(Number(e.target.value || MIN_STORAGE_MB)))
                                       }
-                                      className="app-nodrag w-full rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 pr-11 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                                      className="app-nodrag w-full rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 pr-11 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
                                     />
                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
                                       MB
@@ -1581,7 +1759,7 @@ export function MainAppShell() {
                                   <button
                                     onClick={() => void saveStorageLimit()}
                                     disabled={isSavingStorageLimit || isLoadingStorage}
-                                    className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-3.5 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                    className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-3.5 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
                                   >
                                     {isSavingStorageLimit ? (
                                       <>
@@ -1597,8 +1775,8 @@ export function MainAppShell() {
                             </div>
 
                             {storageUsage && storageUsage.isOverLimit && (
-                              <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 flex items-center justify-between gap-3">
-                                <div className="text-sm text-rose-700">
+                              <div className="rounded-2xl border border-[var(--ui-progress-danger)]/45 bg-[var(--ui-progress-danger)]/18 p-4 flex items-center justify-between gap-3">
+                                <div className="text-sm text-[var(--ui-text)]">
                                   Storage is above limit by{' '}
                                   <span className="font-semibold">
                                     {formatBytes(storageUsage.usedBytes - storageUsage.maxBytes)}
@@ -1608,7 +1786,7 @@ export function MainAppShell() {
                                 <button
                                   onClick={() => void runStorageCleanup()}
                                   disabled={isEnforcingStorageLimit}
-                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-rose-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-progress-danger)] px-3.5 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-danger-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
                                 >
                                   {isEnforcingStorageLimit ? (
                                     <>
@@ -1670,14 +1848,14 @@ export function MainAppShell() {
                   </div>
                   <div
                     className={cn(
-                      'pointer-events-none absolute left-0 right-1 top-0 h-8 bg-gradient-to-b from-[#eef2f6]/95 to-transparent',
+                      'app-settings-scroll-fade app-settings-scroll-fade-top pointer-events-none absolute left-0 right-1 top-0 h-8',
                       'transition-opacity duration-200 ease-out motion-reduce:transition-none',
                       showSettingsTopFade ? 'opacity-100' : 'opacity-0'
                     )}
                   />
                   <div
                     className={cn(
-                      'pointer-events-none absolute left-0 right-1 bottom-0 h-8 bg-gradient-to-t from-[#eef2f6]/95 to-transparent',
+                      'app-settings-scroll-fade app-settings-scroll-fade-bottom pointer-events-none absolute left-0 right-1 bottom-0 h-8',
                       'transition-opacity duration-200 ease-out motion-reduce:transition-none',
                       showSettingsBottomFade ? 'opacity-100' : 'opacity-0'
                     )}
@@ -1727,7 +1905,7 @@ export function MainAppShell() {
                       <button
                         onClick={saveSettings}
                         disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
-                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-4 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-4 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
                       >
                         {isSavingSettings ? (
                           <>
@@ -1898,134 +2076,268 @@ export function MainAppShell() {
                       </div>
                     </div>
 
-                    {isContextModalOpen && (
-                      <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 py-10">
-                        <button
-                          className="absolute inset-0 bg-slate-900/20"
-                          aria-label="Close"
-                          onClick={() => setIsContextModalOpen(false)}
-                        />
-                        <div className="relative w-full max-w-3xl rounded-3xl bg-white border border-slate-200/70 shadow-2xl overflow-hidden">
-                          <div className="px-4 py-3 border-b border-slate-200/60 bg-slate-50/70 flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-xs text-slate-400">Metadata</div>
-                              <div className="text-sm font-semibold text-slate-800 truncate">
-                                {(activeMetadata?.activeApp || activeRecord?.activeApp || 'Unknown app')} ·{' '}
-                                {(activeMetadata?.windowTitle || activeRecord?.windowTitle || 'Unknown window')}
-                              </div>
-                            </div>
-                            <button
-                              className="app-nodrag h-9 w-9 rounded-xl hover:bg-slate-200/40 text-slate-500 flex items-center justify-center transition"
-                              onClick={() => setIsContextModalOpen(false)}
-                              aria-label="Close metadata"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-
-                          <div className="p-4 space-y-4">
-                            <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                              {activeScreenshots.length > 0 && (
-                                <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center gap-2 flex-wrap">
-                                  {activeScreenshots.map((asset, idx) => (
-                                    <button
-                                      key={`${asset.relativePath}-${idx}`}
-                                      onClick={() => setSelectedScreenshotIndex(idx)}
-                                      className={cn(
-                                        'app-nodrag inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] transition',
-                                        idx === selectedScreenshotIndex
-                                          ? 'bg-[#6e8f95] text-white border-[#6e8f95]'
-                                          : 'bg-white/80 text-slate-600 border-slate-200/70 hover:bg-slate-50'
-                                      )}
-                                    >
-                                      {asset.displayId || `Display ${idx + 1}`}
-                                    </button>
-                                  ))}
+                    <AnimatePresence>
+                      {isContextModalOpen && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+                          <motion.button
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.18, ease: 'easeOut' }}
+                            className="absolute inset-0 bg-slate-900/20"
+                            aria-label="Close"
+                            onClick={() => setIsContextModalOpen(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, y: 14, scale: 0.985 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.99 }}
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                            className="relative w-full max-w-5xl max-h-[88vh] rounded-3xl bg-white border border-slate-200/70 shadow-2xl overflow-hidden flex flex-col"
+                          >
+                            <div className="px-4 py-3 border-b border-slate-200/60 bg-slate-50/70 flex items-center justify-between gap-3 shrink-0">
+                              <div className="min-w-0">
+                                <div className="text-xs text-slate-400">Metadata</div>
+                                <div className="text-sm font-semibold text-slate-800 truncate">
+                                  {(activeMetadata?.activeApp || activeRecord?.activeApp || 'Unknown app')} ·{' '}
+                                  {(activeMetadata?.windowTitle || activeRecord?.windowTitle || 'Unknown window')}
                                 </div>
-                              )}
+                              </div>
+                              <button
+                                className="app-nodrag h-9 w-9 rounded-xl hover:bg-slate-200/40 text-slate-500 flex items-center justify-center transition"
+                                onClick={() => setIsContextModalOpen(false)}
+                                aria-label="Close metadata"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
 
-                              <div className="aspect-[16/9] bg-[radial-gradient(800px_260px_at_35%_35%,rgba(110,143,149,0.20)_0%,rgba(255,255,255,0)_60%),linear-gradient(180deg,rgba(255,255,255,0.70)_0%,rgba(241,245,249,0.95)_100%)] flex items-center justify-center overflow-hidden">
-                                {activeScreenshots.length === 0 ? (
-                                  <div className="text-center px-6">
-                                    <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
-                                    <div className="mt-2 text-sm font-semibold text-slate-700">Screenshot preview</div>
-                                    <div className="mt-1 text-xs text-slate-500">(No persisted screenshot)</div>
-                                  </div>
-                                ) : isLoadingScreenshotPreview && !selectedScreenshotDataUrl ? (
-                                  <div className="text-center px-6">
-                                    <Loader2 className="h-7 w-7 text-slate-500 mx-auto animate-spin" />
-                                    <div className="mt-2 text-sm font-semibold text-slate-700">Loading screenshot</div>
-                                  </div>
-                                ) : selectedScreenshotDataUrl ? (
-                                  <img
-                                    src={selectedScreenshotDataUrl}
-                                    alt={`Screenshot ${selectedScreenshotIndex + 1}`}
-                                    className="h-full w-full object-contain"
-                                  />
-                                ) : (
-                                  <div className="text-center px-6">
-                                    <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
-                                    <div className="mt-2 text-sm font-semibold text-slate-700">Preview unavailable</div>
-                                    {screenshotPreviewError && (
-                                      <div className="mt-1 text-xs text-rose-500">{screenshotPreviewError}</div>
+                            <div className="relative min-h-0 flex-1 flex flex-col">
+                              <div ref={contextModalScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+                                <div className="p-4 space-y-4">
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                  {activeScreenshots.length > 0 && (
+                                    <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center gap-2 flex-wrap">
+                                      {activeScreenshots.map((asset, idx) => (
+                                        <button
+                                          key={`${asset.relativePath}-${idx}`}
+                                          onClick={() => setSelectedScreenshotIndex(idx)}
+                                          className={cn(
+                                            'app-nodrag inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] transition',
+                                            idx === selectedScreenshotIndex
+                                              ? 'bg-[var(--ui-accent)] text-[var(--ui-accent-contrast)] border-[var(--ui-accent)]'
+                                              : 'bg-white/80 text-slate-600 border-slate-200/70 hover:bg-slate-50'
+                                          )}
+                                        >
+                                          {asset.displayId || `Display ${idx + 1}`}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="aspect-[16/9] app-screenshot-preview-bg flex items-center justify-center overflow-hidden">
+                                    {activeScreenshots.length === 0 ? (
+                                      <div className="text-center px-6">
+                                        <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
+                                        <div className="mt-2 text-sm font-semibold text-slate-700">Screenshot preview</div>
+                                        <div className="mt-1 text-xs text-slate-500">(No persisted screenshot)</div>
+                                      </div>
+                                    ) : isLoadingScreenshotPreview && !selectedScreenshotDataUrl ? (
+                                      <div className="text-center px-6">
+                                        <Loader2 className="h-7 w-7 text-slate-500 mx-auto animate-spin" />
+                                        <div className="mt-2 text-sm font-semibold text-slate-700">Loading screenshot</div>
+                                      </div>
+                                    ) : selectedScreenshotDataUrl ? (
+                                      <img
+                                        src={selectedScreenshotDataUrl}
+                                        alt={`Screenshot ${selectedScreenshotIndex + 1}`}
+                                        className="h-full w-full object-contain"
+                                      />
+                                    ) : (
+                                      <div className="text-center px-6">
+                                        <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
+                                        <div className="mt-2 text-sm font-semibold text-slate-700">Preview unavailable</div>
+                                        {screenshotPreviewError && (
+                                          <div className="mt-1 text-xs text-[var(--ui-progress-danger)]">
+                                            {screenshotPreviewError}
+                                          </div>
+                                        )}
+                                      </div>
                                     )}
+                                  </div>
+
+                                  {selectedScreenshot && (
+                                    <div className="px-4 py-3 border-t border-slate-200/60 text-xs text-slate-500 flex items-center justify-between gap-3">
+                                      <div className="truncate">
+                                        {selectedScreenshot.displayId || `Display ${selectedScreenshotIndex + 1}`} ·{' '}
+                                        {selectedScreenshot.width}×{selectedScreenshot.height}
+                                      </div>
+                                      <div className="tabular-nums shrink-0">
+                                        {formatBytes(selectedScreenshot.bytes)}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4 text-sm text-slate-700 space-y-1">
+                                  <div className="tabular-nums">
+                                    <span className="text-slate-400">Captured:</span>{' '}
+                                    {activeRecord ? formatTime(activeRecord.timestamp) : '—'}
+                                  </div>
+                                  <div className="break-all">
+                                    <span className="text-slate-400">Active URL:</span>{' '}
+                                    {activeMetadata?.activeUrl ? activeMetadata.activeUrl : '—'}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4">
+                                  <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                    Summary
+                                  </div>
+                                  <div className="mt-2 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+                                    {activeSummaryText || 'No summary extracted yet for this capture.'}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                  <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
+                                    <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                      Candidates
+                                    </div>
+                                    <div className="text-xs text-slate-400 tabular-nums">
+                                      {activeMemoryCandidates.length}
+                                    </div>
+                                  </div>
+                                  {activeMemoryCandidates.length === 0 ? (
+                                    <div className="px-4 py-3 text-sm text-slate-500">
+                                      No candidate extracted for this capture.
+                                    </div>
+                                  ) : (
+                                    <div className="divide-y divide-slate-200/60">
+                                      {activeMemoryCandidates.map((candidate, idx) => (
+                                        <div key={`${candidate.title}-${idx}`} className="px-4 py-3">
+                                          {(() => {
+                                            const rowKey = `${activeRecord?.id ?? 'none'}:${idx}`
+                                            const isExpanded = Boolean(expandedModalCandidateMap[rowKey])
+                                            const detailsRaw =
+                                              typeof candidate.details === 'string' ? candidate.details.trim() : ''
+                                            const sourceRaw =
+                                              typeof candidate.source === 'string' ? candidate.source.trim() : ''
+                                            const hasLongDetails = detailsRaw.length > 220
+                                            const hasLongSource = sourceRaw.length > 120
+                                            const isExpandable = hasLongDetails || hasLongSource
+                                            const displayDetails =
+                                              isExpanded || !hasLongDetails
+                                                ? detailsRaw
+                                                : truncateText(detailsRaw, 220)
+                                            const displaySource =
+                                              isExpanded || !hasLongSource ? sourceRaw : truncateText(sourceRaw, 120)
+
+                                            return (
+                                              <>
+                                          <div className="flex items-center justify-between gap-3">
+                                            <div className="text-sm font-semibold text-slate-800 min-w-0 truncate">
+                                              {candidate.title}
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 tabular-nums shrink-0">
+                                              {typeof candidate.dueAt === 'string' && candidate.dueAt.trim()
+                                                ? candidate.dueAt
+                                                : ''}
+                                            </div>
+                                          </div>
+                                          <div className="mt-1 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                                            <span className="inline-flex items-center rounded-full bg-slate-100 border border-slate-200/70 px-2 py-0.5">
+                                              {candidate.kind}
+                                            </span>
+                                            {typeof candidate.confidence === 'number' && (
+                                              <span className="tabular-nums">
+                                                {Math.round(candidate.confidence * 100)}%
+                                              </span>
+                                            )}
+                                          </div>
+                                          {displayDetails && (
+                                            <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed">
+                                              {displayDetails}
+                                            </div>
+                                          )}
+                                          {displaySource && (
+                                            <div className="mt-2 text-xs text-slate-500 whitespace-pre-wrap break-words">
+                                              Source: {displaySource}
+                                            </div>
+                                          )}
+                                          {isExpandable && (
+                                            <button
+                                              className="app-nodrag mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100/80 transition"
+                                              onClick={() =>
+                                                setExpandedModalCandidateMap((prev) => ({
+                                                  ...prev,
+                                                  [rowKey]: !prev[rowKey]
+                                                }))
+                                              }
+                                            >
+                                              <ChevronDown
+                                                className={cn(
+                                                  'h-3.5 w-3.5 transition-transform duration-200',
+                                                  isExpanded && 'rotate-180'
+                                                )}
+                                              />
+                                              {isExpanded ? 'Collapse' : 'Expand details'}
+                                            </button>
+                                          )}
+                                              </>
+                                            )
+                                          })()}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {activeMetadata && activeMetadata.tabs.length > 0 && (
+                                  <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                    <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
+                                      <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                        Browser tabs
+                                      </div>
+                                      <div className="text-xs text-slate-400 tabular-nums">
+                                        {activeMetadata.tabs.length}
+                                      </div>
+                                    </div>
+                                    <div className="max-h-64 overflow-y-auto">
+                                      {activeMetadata.tabs.map((t, idx) => (
+                                        <div
+                                          key={`${idx}-${t.title}-${t.url}`}
+                                          className="px-4 py-2 border-b border-slate-200/50 last:border-b-0 hover:bg-slate-50/60 transition"
+                                        >
+                                          <div className="text-sm font-medium text-slate-800 truncate">
+                                            {t.title || 'Untitled'}
+                                          </div>
+                                          <div className="text-[11px] text-slate-500 truncate">{t.url}</div>
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
                               </div>
+                              </div>
 
-                              {selectedScreenshot && (
-                                <div className="px-4 py-3 border-t border-slate-200/60 text-xs text-slate-500 flex items-center justify-between gap-3">
-                                  <div className="truncate">
-                                    {selectedScreenshot.displayId || `Display ${selectedScreenshotIndex + 1}`} ·{' '}
-                                    {selectedScreenshot.width}×{selectedScreenshot.height}
-                                  </div>
-                                  <div className="tabular-nums shrink-0">
-                                    {formatBytes(selectedScreenshot.bytes)}
-                                  </div>
-                                </div>
-                              )}
+                              <div
+                                className={cn(
+                                  'app-metadata-scroll-fade app-metadata-scroll-fade-top pointer-events-none absolute left-0 right-1 top-0 h-9 transition-opacity duration-200',
+                                  showContextModalTopFade ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                              <div
+                                className={cn(
+                                  'app-metadata-scroll-fade app-metadata-scroll-fade-bottom pointer-events-none absolute left-0 right-1 bottom-0 h-10 transition-opacity duration-200',
+                                  showContextModalBottomFade ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
                             </div>
-
-                            <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4 text-sm text-slate-700 space-y-1">
-                              <div className="tabular-nums">
-                                <span className="text-slate-400">Captured:</span>{' '}
-                                {activeRecord ? formatTime(activeRecord.timestamp) : '—'}
-                              </div>
-                              <div className="break-all">
-                                <span className="text-slate-400">Active URL:</span>{' '}
-                                {activeMetadata?.activeUrl ? activeMetadata.activeUrl : '—'}
-                              </div>
-                            </div>
-
-                            {activeMetadata && activeMetadata.tabs.length > 0 && (
-                              <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
-                                  <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                                    Browser tabs
-                                  </div>
-                                  <div className="text-xs text-slate-400 tabular-nums">
-                                    {activeMetadata.tabs.length}
-                                  </div>
-                                </div>
-                                <div className="max-h-64 overflow-y-auto">
-                                  {activeMetadata.tabs.map((t, idx) => (
-                                    <div
-                                      key={`${idx}-${t.title}-${t.url}`}
-                                      className="px-4 py-2 border-b border-slate-200/50 last:border-b-0 hover:bg-slate-50/60 transition"
-                                    >
-                                      <div className="text-sm font-medium text-slate-800 truncate">
-                                        {t.title || 'Untitled'}
-                                      </div>
-                                      <div className="text-[11px] text-slate-500 truncate">{t.url}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                          </motion.div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -2040,7 +2352,7 @@ export function MainAppShell() {
                         key={idx}
                         className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap ${
                           m.role === 'user'
-                            ? 'ml-auto bg-[#6e8f95] text-white'
+                            ? 'ml-auto bg-[var(--ui-accent)] text-[var(--ui-accent-contrast)]'
                             : 'mr-auto bg-slate-50 border border-slate-200/60 text-slate-800'
                         }`}
                       >
@@ -2071,12 +2383,12 @@ export function MainAppShell() {
                       }}
                       placeholder={settings.apiKey.trim().length === 0 ? 'Set API key in Settings first…' : 'Type a message…'}
                       disabled={isChatting || settings.apiKey.trim().length === 0}
-                      className="app-nodrag flex-1 rounded-xl bg-slate-50 border border-slate-200/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30 disabled:opacity-60"
+                      className="app-nodrag flex-1 rounded-xl bg-slate-50 border border-slate-200/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)] disabled:opacity-60"
                     />
                     <button
                       onClick={() => void sendMessage()}
                       disabled={isChatting || chatInput.trim().length === 0 || settings.apiKey.trim().length === 0}
-                      className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-3.5 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                      className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-3.5 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
                     >
                       <Send className="h-4 w-4" />
                       Send

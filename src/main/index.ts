@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { config } from 'dotenv'
 import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
+import type { ActiveWindowInfo, BrowserTabInfo, CaptureMetadata } from '@shared/types'
 import { createPanelWindow, getPanelWindow, resizePanel, showPanel } from './panel-window'
 import { registerIpcHandlers } from './ipc-handlers'
 import { registerHotkey, unregisterHotkey } from './hotkey'
@@ -30,6 +31,44 @@ function getErrorMessage(error: unknown): string {
     return JSON.stringify(error)
   } catch {
     return 'Unknown error'
+  }
+}
+
+function sanitizeBrowserTabs(rawTabs: BrowserTabInfo[] | undefined): BrowserTabInfo[] {
+  if (!Array.isArray(rawTabs)) return []
+  return rawTabs
+    .map((tab, idx) => {
+      const title = typeof tab?.title === 'string' ? tab.title.trim() : ''
+      const url = typeof tab?.url === 'string' ? tab.url.trim() : ''
+      if (!title && !url) return null
+      const maybeIndex = Number((tab as BrowserTabInfo).index)
+      const index = Number.isFinite(maybeIndex) && maybeIndex > 0 ? Math.floor(maybeIndex) : idx + 1
+      return { index, title, url }
+    })
+    .filter((tab): tab is BrowserTabInfo => Boolean(tab))
+}
+
+function buildCaptureMetadata(activeWindow: ActiveWindowInfo, capturedAt: number): CaptureMetadata {
+  const activeApp = typeof activeWindow.appName === 'string' && activeWindow.appName.trim()
+    ? activeWindow.appName.trim()
+    : 'Unknown'
+  const windowTitle = typeof activeWindow.windowTitle === 'string' ? activeWindow.windowTitle.trim() : ''
+  const activeUrl =
+    typeof activeWindow.url === 'string' && activeWindow.url.trim().length > 0
+      ? activeWindow.url.trim()
+      : undefined
+  const tabs = sanitizeBrowserTabs(activeWindow.browserTabs)
+  const rawActiveTabIndex = Number(activeWindow.activeTabIndex)
+  const activeTabIndex =
+    Number.isFinite(rawActiveTabIndex) && rawActiveTabIndex > 0 ? Math.floor(rawActiveTabIndex) : undefined
+
+  return {
+    activeApp,
+    windowTitle,
+    activeUrl,
+    capturedAt,
+    tabs,
+    activeTabIndex
   }
 }
 
@@ -69,6 +108,7 @@ async function orchestrateCapture(): Promise<void> {
       activeWindowResult.status === 'fulfilled'
         ? activeWindowResult.value
         : { appName: 'Unknown', windowTitle: '' }
+    const capturedAt = Date.now()
 
     // Call Claude API
     console.log('[Main] Calling Claude API...')
@@ -128,13 +168,17 @@ async function orchestrateCapture(): Promise<void> {
       }
     }
 
+    if (result.type === 'capture-analysis') {
+      result.metadata = buildCaptureMetadata(activeWindow, capturedAt)
+    }
+
     // Send result to renderer
     resizePanel('expanded')
     broadcastToRenderers(IPC.PANEL_SHOW_RESULT, result)
 
     // Save to history
     const savedRecord = saveRecord({
-      timestamp: Date.now(),
+      timestamp: capturedAt,
       activeApp: activeWindow.appName,
       windowTitle: activeWindow.windowTitle,
       resultType: result.type,

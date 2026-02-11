@@ -11,6 +11,7 @@ It sends screenshots to an OpenAI-compatible API and shows either:
 
 - a conservative email reply draft (only when an email UI is clearly detected), and
 - a short list of actionable **memory candidates** (todos, reminders, deliveries, reading list, etc.) that you can save.
+- real active-window metadata (active app, window title, active URL), and when the front app is a supported browser, the full tab list (title + URL) from open browser windows.
 
 The main window also provides a simple chat UI:
 
@@ -209,6 +210,7 @@ Note:
 - Chat:
   - Screen context section is expanded by default
   - Context uses **raw metadata first** (active app/window/url/tabs), then falls back to model output text when needed
+  - Browser metadata is sourced from macOS automation in main process (`active-window.ts`) and includes all collected tabs for supported browsers (Safari, Chrome, Arc, Brave, Edge)
 - Memory:
   - Saved items you confirmed from the capture panel
 - Settings:

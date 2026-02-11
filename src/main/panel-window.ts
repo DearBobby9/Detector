@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, screen, type Display } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
@@ -9,20 +9,34 @@ const PANEL_WIDTH_COLLAPSED = 380
 const PANEL_HEIGHT_COLLAPSED = 72
 const PANEL_WIDTH_EXPANDED = 460
 const PANEL_HEIGHT_EXPANDED = 360
+const PANEL_WIDTH_DETAIL = 900
+const PANEL_HEIGHT_DETAIL = 620
 const PANEL_TOP_OFFSET_PX = 12
 const BLUR_HIDE_GRACE_MS = 300
 
 let panelWindow: BrowserWindow | null = null
 let lastShownAt = 0
 let lastMode: PanelMode = 'collapsed'
+let lastNonDetailMode: Exclude<PanelMode, 'detail'> = 'collapsed'
 
-type PanelMode = 'collapsed' | 'expanded'
+type PanelMode = 'collapsed' | 'expanded' | 'detail'
 
 function getModeSize(mode: PanelMode): { width: number; height: number } {
   if (mode === 'collapsed') {
     return { width: PANEL_WIDTH_COLLAPSED, height: PANEL_HEIGHT_COLLAPSED }
   }
+  if (mode === 'detail') {
+    return { width: PANEL_WIDTH_DETAIL, height: PANEL_HEIGHT_DETAIL }
+  }
   return { width: PANEL_WIDTH_EXPANDED, height: PANEL_HEIGHT_EXPANDED }
+}
+
+function getDisplayForPanel(): Display {
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    return screen.getDisplayMatching(panelWindow.getBounds())
+  }
+  const cursorPoint = screen.getCursorScreenPoint()
+  return screen.getDisplayNearestPoint(cursorPoint)
 }
 
 function loadRenderer(window: BrowserWindow, view: 'app' | 'panel'): void {
@@ -91,18 +105,19 @@ export function getPanelWindow(): BrowserWindow | null {
 export function showPanel(mode: PanelMode = 'expanded'): void {
   if (!panelWindow) return
 
-  // Position at top-center of the screen where the cursor is
-  const cursorPoint = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursorPoint)
-  const { x, y, width } = display.workArea
+  const display = getDisplayForPanel()
+  const { x, y, width, height } = display.workArea
 
   const size = getModeSize(mode)
   const panelX = Math.round(x + (width - size.width) / 2)
-  const panelY = y + PANEL_TOP_OFFSET_PX
+  const panelY = mode === 'detail' ? Math.round(y + (height - size.height) / 2) : y + PANEL_TOP_OFFSET_PX
 
   panelWindow.setBounds({ x: panelX, y: panelY, width: size.width, height: size.height })
   lastShownAt = Date.now()
   lastMode = mode
+  if (mode !== 'detail') {
+    lastNonDetailMode = mode
+  }
   panelWindow.showInactive()
   console.log('[PanelWindow] Shown at', panelX, panelY)
 }
@@ -110,17 +125,33 @@ export function showPanel(mode: PanelMode = 'expanded'): void {
 export function resizePanel(mode: PanelMode): void {
   if (!panelWindow) return
 
-  // Keep center anchored so the panel doesn't "jump" if the cursor moves during capture.
-  const prev = panelWindow.getBounds()
   const size = getModeSize(mode)
-  const nextX = Math.round(prev.x + (prev.width - size.width) / 2)
+  const prev = panelWindow.getBounds()
+  const display = getDisplayForPanel()
+  const { x, y, width, height } = display.workArea
 
-  panelWindow.setBounds({ x: nextX, y: prev.y, width: size.width, height: size.height })
+  const nextX = Math.round(prev.x + (prev.width - size.width) / 2)
+  const nextY = mode === 'detail' ? Math.round(y + (height - size.height) / 2) : y + PANEL_TOP_OFFSET_PX
+
+  panelWindow.setBounds({ x: nextX, y: nextY, width: size.width, height: size.height })
   lastMode = mode
+  if (mode !== 'detail') {
+    lastNonDetailMode = mode
+  }
 }
 
 export function getPanelMode(): PanelMode {
   return lastMode
+}
+
+export function enterPanelDetailView(): void {
+  if (!panelWindow) return
+  resizePanel('detail')
+}
+
+export function exitPanelDetailView(): void {
+  if (!panelWindow) return
+  resizePanel(lastNonDetailMode)
 }
 
 export function hidePanel(): void {

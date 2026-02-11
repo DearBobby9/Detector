@@ -2,6 +2,23 @@ export interface ActiveWindowInfo {
   appName: string
   windowTitle: string
   url?: string
+  browserTabs?: BrowserTabInfo[]
+  activeTabIndex?: number
+}
+
+export interface BrowserTabInfo {
+  index: number
+  title: string
+  url: string
+}
+
+export interface CaptureMetadata {
+  activeApp: string
+  windowTitle: string
+  activeUrl?: string
+  capturedAt: number
+  tabs: BrowserTabInfo[]
+  activeTabIndex?: number
 }
 
 export type StorageCategory = 'history' | 'memory' | 'screenshots'
@@ -104,6 +121,7 @@ export interface CaptureAnalysisResult {
   screenTitle: string
   email: CaptureEmailDraft
   memoryCandidates: MemoryCandidate[]
+  metadata?: CaptureMetadata
 }
 
 export type DetectionResult = EmailReplyResult | PageSummaryResult | CaptureAnalysisResult
@@ -134,12 +152,15 @@ export interface HistoryRecord {
   screenshotPersistedAt?: number
 }
 
+export type ThemeMode = 'light' | 'dark' | 'system'
+
 export interface AppSettings {
   apiBaseUrl: string
   apiKey: string
   apiModel: string
   apiTimeoutMs: number
   maxStorageBytes: number
+  themeMode: ThemeMode
 }
 
 export type ChatRole = 'user' | 'assistant'

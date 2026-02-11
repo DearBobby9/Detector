@@ -3,6 +3,8 @@ export const IPC = {
   PANEL_SHOW_RESULT: 'panel:show-result',
   PANEL_SHOW_ERROR: 'panel:show-error',
   PANEL_DISMISS: 'panel:dismiss',
+  PANEL_ENTER_DETAIL_VIEW: 'panel:enter-detail-view',
+  PANEL_EXIT_DETAIL_VIEW: 'panel:exit-detail-view',
   CLIPBOARD_WRITE: 'clipboard:write',
   PANEL_READY: 'panel:ready',
   SETTINGS_GET: 'settings:get',

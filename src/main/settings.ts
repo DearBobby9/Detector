@@ -1,17 +1,24 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { AppSettings } from '@shared/types'
+import { AppSettings, ThemeMode } from '@shared/types'
 
 const SETTINGS_FILE = join(app.getPath('userData'), 'settings.json')
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_MAX_STORAGE_BYTES = 512 * 1024 * 1024
 const MIN_MAX_STORAGE_BYTES = 50 * 1024 * 1024
 const MAX_MAX_STORAGE_BYTES = 5 * 1024 * 1024 * 1024
+const DEFAULT_THEME_MODE: ThemeMode = 'light'
+
+function normalizeThemeMode(raw: unknown): ThemeMode {
+  if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
+  return DEFAULT_THEME_MODE
+}
 
 function getDefaultSettings(): AppSettings {
   const timeoutFromEnv = Number(process.env.API_TIMEOUT_MS)
   const maxStorageFromEnv = Number(process.env.MAX_STORAGE_BYTES)
+  const themeModeFromEnv = normalizeThemeMode((process.env.THEME_MODE || '').trim().toLowerCase())
 
   return {
     apiBaseUrl: (process.env.API_BASE_URL || 'https://api.openai.com/v1').trim(),
@@ -26,7 +33,8 @@ function getDefaultSettings(): AppSettings {
       maxStorageFromEnv >= MIN_MAX_STORAGE_BYTES &&
       maxStorageFromEnv <= MAX_MAX_STORAGE_BYTES
         ? Math.floor(maxStorageFromEnv)
-        : DEFAULT_MAX_STORAGE_BYTES
+        : DEFAULT_MAX_STORAGE_BYTES,
+    themeMode: themeModeFromEnv
   }
 }
 
@@ -67,13 +75,15 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     Number.isFinite(storageCandidate) && storageCandidate > 0
       ? Math.min(MAX_MAX_STORAGE_BYTES, Math.max(MIN_MAX_STORAGE_BYTES, Math.floor(storageCandidate)))
       : defaults.maxStorageBytes
+  const themeMode = normalizeThemeMode((input as Partial<AppSettings> & { themeMode?: unknown }).themeMode)
 
   return {
     apiBaseUrl,
     apiKey,
     apiModel,
     apiTimeoutMs,
-    maxStorageBytes
+    maxStorageBytes,
+    themeMode
   }
 }
 

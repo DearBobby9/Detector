@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
+  --background: 53 27% 95%;
+  --foreground: 24 9% 25%;
+  --card: 53 27% 95%;
+  --card-foreground: 24 9% 25%;
+  --popover: 53 27% 95%;
+  --popover-foreground: 24 9% 25%;
+  --primary: 24 6% 51%;
+  --primary-foreground: 53 27% 95%;
+  --secondary: 35 8% 72%;
+  --secondary-foreground: 24 9% 25%;
+  --muted: 35 8% 72%;
+  --muted-foreground: 24 6% 51%;
+  --accent: 15 49% 75%;
+  --accent-foreground: 24 9% 25%;
+  --destructive: 15 49% 75%;
+  --destructive-foreground: 24 9% 25%;
+  --border: 24 6% 51%;
+  --input: 35 8% 72%;
+  --ring: 15 49% 75%;
   --radius: 0.75rem;
 }
 
@@ -48,25 +48,25 @@
 }
 
 .dark {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
+  --background: 23 9% 25%;
+  --foreground: 53 27% 95%;
+  --card: 24 6% 51%;
+  --card-foreground: 53 27% 95%;
+  --popover: 23 9% 25%;
+  --popover-foreground: 53 27% 95%;
+  --primary: 15 49% 75%;
+  --primary-foreground: 23 9% 25%;
+  --secondary: 24 6% 51%;
+  --secondary-foreground: 53 27% 95%;
+  --muted: 24 6% 51%;
+  --muted-foreground: 35 8% 72%;
+  --accent: 35 8% 72%;
+  --accent-foreground: 23 9% 25%;
+  --destructive: 15 49% 75%;
+  --destructive-foreground: 23 9% 25%;
+  --border: 35 8% 72%;
+  --input: 24 6% 51%;
+  --ring: 15 49% 75%;
 }
 
 * {
@@ -88,14 +88,255 @@ body[data-view="panel"] {
   background: transparent;
 }
 
-body[data-view="app"] {
-  background: #f2f5f8;
+body:is([data-view="app"], [data-view="panel"]) {
+  --ui-taupe: #463f3a;
+  --ui-grey-olive: #8a817c;
+  --ui-silver: #bcb8b1;
+  --ui-parchment: #f4f3ee;
+  --ui-powder-blush: #e0afa0;
+  --ui-sidebar-fade-strong: color-mix(in srgb, var(--ui-sidebar-bg) 97%, transparent);
+  --ui-sidebar-fade-soft: color-mix(in srgb, var(--ui-sidebar-bg) 70%, transparent);
+  --ui-settings-fade-strong: color-mix(in srgb, var(--ui-bg-base) 96%, transparent);
+  --ui-settings-fade-soft: color-mix(in srgb, var(--ui-bg-base) 68%, transparent);
+}
+
+body:is([data-view="app"], [data-view="panel"]):not([data-theme-mode]),
+body:is([data-view="app"], [data-view="panel"])[data-theme-mode="light"] {
+  --ui-bg-base: var(--ui-parchment);
+  --ui-bg-soft: rgba(188, 184, 177, 0.32);
+  --ui-bg-glow: rgba(224, 175, 160, 0.24);
+  --ui-bg-radial-1: rgba(224, 175, 160, 0.33);
+  --ui-bg-radial-2: rgba(188, 184, 177, 0.36);
+  --ui-bg-radial-3: rgba(138, 129, 124, 0.17);
+  --ui-sidebar-bg: rgba(244, 243, 238, 0.88);
+  --ui-surface: rgba(244, 243, 238, 0.78);
+  --ui-surface-soft: rgba(244, 243, 238, 0.68);
+  --ui-surface-strong: rgba(244, 243, 238, 0.94);
+  --ui-surface-muted: rgba(188, 184, 177, 0.22);
+  --ui-border: rgba(138, 129, 124, 0.48);
+  --ui-border-strong: rgba(70, 63, 58, 0.64);
+  --ui-text-strong: var(--ui-taupe);
+  --ui-text: var(--ui-taupe);
+  --ui-text-muted-strong: var(--ui-grey-olive);
+  --ui-text-muted: var(--ui-grey-olive);
+  --ui-text-soft: rgba(138, 129, 124, 0.74);
+  --ui-accent: var(--ui-taupe);
+  --ui-accent-hover: var(--ui-grey-olive);
+  --ui-accent-contrast: var(--ui-parchment);
+  --ui-accent-ring: rgba(224, 175, 160, 0.58);
+  --ui-progress-normal: var(--ui-grey-olive);
+  --ui-progress-warning: var(--ui-powder-blush);
+  --ui-progress-danger: var(--ui-powder-blush);
+  --ui-danger-hover: var(--ui-grey-olive);
+  --ui-overlay: rgba(70, 63, 58, 0.26);
+  --ui-shadow-soft: 0 14px 34px -24px rgba(70, 63, 58, 0.36);
+  --ui-shadow-strong: 0 28px 66px -38px rgba(70, 63, 58, 0.46);
   color-scheme: light;
+}
+
+body:is([data-view="app"], [data-view="panel"])[data-theme-mode="dark"] {
+  --ui-bg-base: color-mix(in srgb, var(--ui-taupe) 84%, var(--ui-grey-olive) 16%);
+  --ui-bg-soft: rgba(188, 184, 177, 0.16);
+  --ui-bg-glow: rgba(224, 175, 160, 0.2);
+  --ui-bg-radial-1: rgba(224, 175, 160, 0.24);
+  --ui-bg-radial-2: rgba(188, 184, 177, 0.16);
+  --ui-bg-radial-3: rgba(138, 129, 124, 0.24);
+  --ui-sidebar-bg: rgba(70, 63, 58, 0.82);
+  --ui-surface: rgba(138, 129, 124, 0.26);
+  --ui-surface-soft: rgba(138, 129, 124, 0.16);
+  --ui-surface-strong: rgba(138, 129, 124, 0.34);
+  --ui-surface-muted: rgba(188, 184, 177, 0.12);
+  --ui-border: rgba(188, 184, 177, 0.34);
+  --ui-border-strong: rgba(244, 243, 238, 0.44);
+  --ui-text-strong: var(--ui-parchment);
+  --ui-text: var(--ui-parchment);
+  --ui-text-muted-strong: var(--ui-silver);
+  --ui-text-muted: var(--ui-silver);
+  --ui-text-soft: rgba(188, 184, 177, 0.76);
+  --ui-accent: var(--ui-powder-blush);
+  --ui-accent-hover: var(--ui-silver);
+  --ui-accent-contrast: var(--ui-taupe);
+  --ui-accent-ring: rgba(224, 175, 160, 0.64);
+  --ui-progress-normal: var(--ui-powder-blush);
+  --ui-progress-warning: var(--ui-powder-blush);
+  --ui-progress-danger: var(--ui-powder-blush);
+  --ui-danger-hover: var(--ui-silver);
+  --ui-overlay: rgba(70, 63, 58, 0.62);
+  --ui-shadow-soft: 0 14px 34px -26px rgba(70, 63, 58, 0.6);
+  --ui-shadow-strong: 0 32px 78px -42px rgba(70, 63, 58, 0.72);
+  color-scheme: dark;
 }
 
 body {
   color: hsl(var(--foreground));
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-shell-background {
+  background:
+    radial-gradient(1120px 690px at 70% 16%, var(--ui-bg-radial-1) 0%, rgba(0, 0, 0, 0) 62%),
+    radial-gradient(1020px 760px at 14% 86%, var(--ui-bg-radial-2) 0%, rgba(0, 0, 0, 0) 70%),
+    radial-gradient(880px 560px at 88% 86%, var(--ui-bg-radial-3) 0%, rgba(0, 0, 0, 0) 76%),
+    linear-gradient(
+      156deg,
+      color-mix(in srgb, var(--ui-bg-base) 84%, var(--ui-powder-blush) 16%) 0%,
+      color-mix(in srgb, var(--ui-bg-base) 90%, var(--ui-silver) 10%) 52%,
+      color-mix(in srgb, var(--ui-bg-base) 92%, var(--ui-grey-olive) 8%) 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-base) 94%, var(--ui-bg-soft) 6%) 0%,
+      var(--ui-bg-base) 100%
+    ),
+    repeating-linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--ui-bg-base) 98%, transparent) 0px,
+      color-mix(in srgb, var(--ui-bg-base) 98%, transparent) 68px,
+      color-mix(in srgb, var(--ui-bg-soft) 10%, transparent) 68px,
+      color-mix(in srgb, var(--ui-bg-soft) 10%, transparent) 136px
+    );
+  transition: background 240ms ease-out;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-sidebar {
+  background: var(--ui-sidebar-bg);
+  border-right: 1px solid var(--ui-border);
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, var(--ui-border-strong) 78%, transparent),
+    16px 0 38px -28px color-mix(in srgb, var(--ui-taupe) 42%, transparent);
+  transition:
+    background-color 220ms ease-out,
+    border-color 220ms ease-out,
+    box-shadow 220ms ease-out;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-scroll-fade-top {
+  background: linear-gradient(
+    to bottom,
+    var(--ui-sidebar-fade-strong) 0%,
+    var(--ui-sidebar-fade-soft) 46%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-scroll-fade-bottom {
+  background: linear-gradient(
+    to top,
+    var(--ui-sidebar-fade-strong) 0%,
+    var(--ui-sidebar-fade-soft) 46%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-settings-scroll-fade-top {
+  background: linear-gradient(
+    to bottom,
+    var(--ui-settings-fade-strong) 0%,
+    var(--ui-settings-fade-soft) 46%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-settings-scroll-fade-bottom {
+  background: linear-gradient(
+    to top,
+    var(--ui-settings-fade-strong) 0%,
+    var(--ui-settings-fade-soft) 46%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-metadata-scroll-fade-top {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ui-surface-strong) 96%, transparent) 0%,
+    color-mix(in srgb, var(--ui-surface) 74%, transparent) 46%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-metadata-scroll-fade-bottom {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--ui-surface-strong) 97%, transparent) 0%,
+    color-mix(in srgb, var(--ui-surface) 76%, transparent) 44%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-screenshot-preview-bg {
+  background:
+    radial-gradient(760px 280px at 34% 35%, var(--ui-bg-glow) 0%, rgba(0, 0, 0, 0) 62%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-surface-strong) 86%, transparent) 0%,
+      color-mix(in srgb, var(--ui-surface-muted) 86%, transparent) 100%
+    );
+}
+
+/* Map existing utility-heavy classes to palette tokens so we can theme without rewriting every node. */
+body:is([data-view="app"], [data-view="panel"]) .text-slate-800 { color: var(--ui-text-strong) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-slate-700 { color: var(--ui-text) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-slate-600 { color: var(--ui-text-muted-strong) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-slate-500 { color: var(--ui-text-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-slate-400 { color: var(--ui-text-soft) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-white { color: var(--ui-accent-contrast) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-blue-400 { color: var(--ui-accent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-foreground\/90 { color: color-mix(in srgb, var(--ui-text) 90%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-foreground\/85 { color: color-mix(in srgb, var(--ui-text) 85%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-muted-foreground\/90 { color: color-mix(in srgb, var(--ui-text-muted) 90%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-muted-foreground\/80 { color: color-mix(in srgb, var(--ui-text-muted) 80%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .text-muted-foreground\/70 { color: color-mix(in srgb, var(--ui-text-muted) 70%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white { background-color: var(--ui-surface-strong) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/90 { background-color: color-mix(in srgb, var(--ui-surface-strong) 94%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/85 { background-color: color-mix(in srgb, var(--ui-surface-strong) 88%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/80 { background-color: var(--ui-surface) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/70 { background-color: var(--ui-surface-soft) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/60 { background-color: var(--ui-surface-soft) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/20 { background-color: color-mix(in srgb, var(--ui-surface-muted) 56%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/15 { background-color: color-mix(in srgb, var(--ui-surface-muted) 46%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/10 { background-color: color-mix(in srgb, var(--ui-surface-muted) 40%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/5 { background-color: color-mix(in srgb, var(--ui-surface-muted) 26%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-white\/0 { background-color: transparent !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-50 { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-50\/70 { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-50\/60 { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-100 { background-color: color-mix(in srgb, var(--ui-surface-muted) 74%, var(--ui-surface-strong) 26%) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-slate-200\/80 { border-color: var(--ui-border) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-slate-200\/70 { border-color: var(--ui-border) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-slate-200\/60 { border-color: var(--ui-border) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-slate-200\/50 { border-color: color-mix(in srgb, var(--ui-border) 84%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-white\/10 { border-color: color-mix(in srgb, var(--ui-border) 86%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .border-white\/5 { border-color: color-mix(in srgb, var(--ui-border) 66%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-200\/20 { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-200\/10 { background-color: color-mix(in srgb, var(--ui-surface-muted) 66%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-slate-50:hover { background-color: var(--ui-surface-soft) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-slate-100\/80:hover { background-color: var(--ui-surface-soft) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-slate-200\/50:hover { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-slate-200\/40:hover { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-slate-200\/10:hover { background-color: var(--ui-surface-muted) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-white:hover { background-color: var(--ui-surface-strong) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-white\/10:hover { background-color: color-mix(in srgb, var(--ui-surface-muted) 54%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-white\/15:hover { background-color: color-mix(in srgb, var(--ui-surface-muted) 62%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-white\/20:hover { background-color: color-mix(in srgb, var(--ui-surface-muted) 68%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-white\/\[0\.07\]:hover { background-color: color-mix(in srgb, var(--ui-surface-muted) 44%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:text-slate-600:hover { color: var(--ui-text-muted-strong) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-900\/20 { background-color: var(--ui-overlay) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-900\/25 { background-color: var(--ui-overlay) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-900\/10 { background-color: color-mix(in srgb, var(--ui-overlay) 56%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-slate-900\/15 { background-color: color-mix(in srgb, var(--ui-overlay) 70%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-black\/50 { background-color: color-mix(in srgb, var(--ui-overlay) 90%, rgba(0, 0, 0, 0.16)) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-black\/10 { background-color: color-mix(in srgb, var(--ui-overlay) 42%, transparent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .bg-blue-500 { background-color: var(--ui-accent) !important; }
+body:is([data-view="app"], [data-view="panel"]) .hover\:bg-blue-600:hover { background-color: var(--ui-accent-hover) !important; }
+body:is([data-view="app"], [data-view="panel"]) .shadow-sm {
+  box-shadow: var(--ui-shadow-soft) !important;
+}
+body:is([data-view="app"], [data-view="panel"]) .shadow-2xl {
+  box-shadow: var(--ui-shadow-strong) !important;
+}
+body:is([data-view="app"], [data-view="panel"]) .divide-slate-200\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--ui-border) !important;
 }
 
 .app-drag {
@@ -116,14 +357,14 @@ body {
 }
 
 .sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.18);
+  background: color-mix(in srgb, var(--ui-grey-olive) 56%, transparent);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
 .sidebar-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.28);
+  background: color-mix(in srgb, var(--ui-taupe) 64%, transparent);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: content-box;

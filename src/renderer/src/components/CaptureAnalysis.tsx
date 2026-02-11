@@ -78,6 +78,16 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     return parseLineList(expandedCandidate.details)
   }, [expandedCandidateIndex, chromeTabsIndex, expandedCandidate])
 
+  const expandedCandidateDetails = useMemo(() => {
+    if (!expandedCandidate || typeof expandedCandidate.details !== 'string') return ''
+    return expandedCandidate.details.trim()
+  }, [expandedCandidate])
+
+  const expandedCandidateSource = useMemo(() => {
+    if (!expandedCandidate || typeof expandedCandidate.source !== 'string') return ''
+    return expandedCandidate.source.trim()
+  }, [expandedCandidate])
+
   useEffect(() => {
     if (expandedCandidateIndex == null) return
     if (!memoryCandidates[expandedCandidateIndex]) {
@@ -111,11 +121,20 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
   const openCandidateDetail = (index: number) => {
     if (!Number.isFinite(index) || index < 0) return
     setExpandedCandidateIndex(index)
+    window.electronAPI.panelEnterDetailView()
   }
 
   const closeCandidateDetail = () => {
     setExpandedCandidateIndex(null)
+    window.electronAPI.panelExitDetailView()
   }
+
+  useEffect(() => {
+    if (expandedCandidateIndex == null) return
+    return () => {
+      window.electronAPI.panelExitDetailView()
+    }
+  }, [expandedCandidateIndex])
 
   const renderChromeTabsInline = () => {
     if (!chromeTabsCandidate) return null
@@ -549,17 +568,13 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
             aria-label="Close candidate detail"
             onClick={closeCandidateDetail}
           />
-
-          <div className="relative w-full max-w-2xl max-h-[86vh] rounded-2xl bg-[hsl(var(--card))]/95 border border-white/10 shadow-2xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/10 bg-white/5 flex items-start justify-between gap-3">
+          <div className="relative w-full max-w-[900px] max-h-[74vh] rounded-2xl bg-[hsl(var(--card))]/95 border border-white/10 shadow-2xl overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/10 bg-white/5 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-xs text-muted-foreground">
-                  [{expandedCandidate.kind}]
-                  {typeof expandedCandidate.dueAt === 'string' && expandedCandidate.dueAt.trim()
-                    ? ` • ${expandedCandidate.dueAt}`
-                    : ''}
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Candidate detail • Split view
                 </div>
-                <div className="mt-1 text-base font-semibold text-foreground break-words">
+                <div className="mt-0.5 text-[17px] leading-tight font-semibold text-foreground truncate">
                   {expandedCandidate.title}
                 </div>
               </div>
@@ -572,58 +587,73 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
               </button>
             </div>
 
-            <div className="p-4 overflow-y-auto max-h-[calc(86vh-136px)] space-y-4">
-              {typeof expandedCandidate.details === 'string' && expandedCandidate.details.trim().length > 0 ? (
-                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
-                  <div className="text-xs font-medium text-muted-foreground">Details</div>
-                  <div className="mt-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground">
-                    {expandedCandidate.details}
+            <div className="grid grid-cols-12 min-h-0 max-h-[calc(74vh-52px)]">
+              <aside className="col-span-4 border-r border-white/10 bg-black/10 p-3 space-y-2.5 overflow-y-auto">
+                <div className="rounded-lg bg-white/5 border border-white/10 p-2.5 space-y-1.5">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Kind</div>
+                  <div className="text-[13px] font-medium text-foreground">[{expandedCandidate.kind}]</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground pt-1">Due</div>
+                  <div className="text-[13px] text-foreground/90">
+                    {typeof expandedCandidate.dueAt === 'string' && expandedCandidate.dueAt.trim()
+                      ? expandedCandidate.dueAt
+                      : 'No due time'}
                   </div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground pt-1">Tab titles</div>
+                  <div className="text-[13px] text-foreground/90">{expandedCandidateTabTitles.length}</div>
                 </div>
-              ) : (
-                <div className="rounded-lg bg-white/5 border border-white/10 p-3 text-sm text-muted-foreground">
-                  No extra details.
-                </div>
-              )}
 
-              {expandedCandidateTabTitles.length > 0 && (
-                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    Chrome tab titles ({expandedCandidateTabTitles.length})
+                {expandedCandidateSource && (
+                  <div className="rounded-lg bg-white/5 border border-white/10 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Source</div>
+                    <div className="mt-1.5 text-[12px] leading-5 whitespace-pre-wrap break-words text-foreground/85">
+                      {expandedCandidateSource}
+                    </div>
                   </div>
-                  <div className="mt-2 max-h-56 overflow-y-auto rounded-md bg-black/20 border border-white/10 p-2 space-y-1">
-                    {expandedCandidateTabTitles.map((title, index) => (
-                      <div key={`${index}-${title}`} className="text-xs leading-relaxed text-foreground/90 break-words">
-                        {index + 1}. {title}
-                      </div>
-                    ))}
+                )}
+
+                <div className="rounded-lg bg-white/5 border border-white/10 p-2 space-y-2">
+                  <button
+                    onClick={() => onCopy(formatCandidateForCopy(expandedCandidate))}
+                    className="w-full px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-[13px] text-muted-foreground hover:bg-white/10 transition-colors"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    onClick={closeCandidateDetail}
+                    className="w-full px-3 py-1.5 rounded-md bg-white/10 border border-white/10 text-[13px] text-foreground hover:bg-white/15 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </aside>
+
+              <section className="col-span-8 p-3 overflow-y-auto space-y-2.5">
+                <div className="rounded-lg bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Details</div>
+                  <div className="mt-1.5 text-[13px] leading-5 whitespace-pre-wrap break-words text-foreground">
+                    {expandedCandidateDetails || 'No extra details.'}
                   </div>
                 </div>
-              )}
 
-              {typeof expandedCandidate.source === 'string' && expandedCandidate.source.trim().length > 0 && (
-                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
-                  <div className="text-xs font-medium text-muted-foreground">Source</div>
-                  <div className="mt-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground/90">
-                    {expandedCandidate.source}
+                {expandedCandidateTabTitles.length > 0 && (
+                  <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
+                    <div className="px-2.5 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Chrome tab titles
+                    </div>
+                    <div className="max-h-56 overflow-y-auto">
+                      {expandedCandidateTabTitles.map((title, index) => (
+                        <div
+                          key={`${index}-${title}`}
+                          className="px-2.5 py-1.5 border-b border-white/5 last:border-b-0 text-[12px] leading-5 text-foreground/90 break-words"
+                        >
+                          <span className="text-muted-foreground tabular-nums mr-2">{index + 1}.</span>
+                          {title}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-
-            <div className="px-4 py-3 border-t border-white/10 bg-white/5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => onCopy(formatCandidateForCopy(expandedCandidate))}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-muted-foreground hover:bg-white/10 transition-colors"
-              >
-                Copy
-              </button>
-              <button
-                onClick={() => closeCandidateDetail()}
-                className="px-3 py-2 rounded-lg bg-white/10 border border-white/10 text-sm text-foreground hover:bg-white/15 transition-colors"
-              >
-                Close
-              </button>
+                )}
+              </section>
             </div>
           </div>
         </div>

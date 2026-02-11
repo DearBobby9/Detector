@@ -1,7 +1,7 @@
 import { ipcMain, clipboard } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import { AppSettings, ChatMessage } from '@shared/types'
-import { hidePanel } from './panel-window'
+import { enterPanelDetailView, exitPanelDetailView, hidePanel } from './panel-window'
 import { getSettings, saveSettings } from './settings'
 import { getHistory } from './database'
 import { listMemory, saveMemory } from './memory-database'
@@ -23,6 +23,14 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
   ipcMain.on(IPC.PANEL_DISMISS, () => {
     console.log('[IPC] Dismiss received')
     hidePanel()
+  })
+
+  ipcMain.on(IPC.PANEL_ENTER_DETAIL_VIEW, () => {
+    enterPanelDetailView()
+  })
+
+  ipcMain.on(IPC.PANEL_EXIT_DETAIL_VIEW, () => {
+    exitPanelDetailView()
   })
 
   ipcMain.on(IPC.CLIPBOARD_WRITE, (_event, text: string) => {

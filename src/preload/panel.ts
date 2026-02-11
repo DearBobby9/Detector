@@ -33,6 +33,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send(IPC.PANEL_DISMISS)
   },
 
+  panelEnterDetailView: () => {
+    ipcRenderer.send(IPC.PANEL_ENTER_DETAIL_VIEW)
+  },
+
+  panelExitDetailView: () => {
+    ipcRenderer.send(IPC.PANEL_EXIT_DETAIL_VIEW)
+  },
+
   clipboardWrite: (text: string) => {
     ipcRenderer.send(IPC.CLIPBOARD_WRITE, text)
   },

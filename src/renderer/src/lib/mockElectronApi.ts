@@ -20,7 +20,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
-  maxStorageBytes: 512 * 1024 * 1024
+  maxStorageBytes: 512 * 1024 * 1024,
+  themeMode: 'light'
 }
 
 function sleep(ms: number): Promise<void> {
@@ -335,6 +336,12 @@ export function createMockElectronAPI(): ElectronAPI {
       return () => errorListeners.delete(callback)
     },
     dismiss: () => {
+      // noop in browser preview
+    },
+    panelEnterDetailView: () => {
+      // noop in browser preview
+    },
+    panelExitDetailView: () => {
       // noop in browser preview
     },
     clipboardWrite: (text: string) => {

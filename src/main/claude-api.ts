@@ -154,6 +154,36 @@ function isAbortError(error: unknown): boolean {
   )
 }
 
+function buildActiveContextText(activeWindow: ActiveWindowInfo): string {
+  const lines: string[] = []
+  const appName = typeof activeWindow.appName === 'string' && activeWindow.appName.trim()
+    ? activeWindow.appName.trim()
+    : 'Unknown'
+  const windowTitle = typeof activeWindow.windowTitle === 'string' ? activeWindow.windowTitle.trim() : ''
+  const activeUrl = typeof activeWindow.url === 'string' ? activeWindow.url.trim() : ''
+  const browserTabs = Array.isArray(activeWindow.browserTabs) ? activeWindow.browserTabs : []
+
+  lines.push(`Active application: ${appName}`)
+  lines.push(`Window title: ${windowTitle || '(no title)'}`)
+  if (activeUrl) {
+    lines.push(`Active URL: ${activeUrl}`)
+  }
+
+  if (browserTabs.length > 0) {
+    lines.push('')
+    lines.push(`Browser tabs (${browserTabs.length}):`)
+    for (const tab of browserTabs) {
+      const index = Number.isFinite(Number(tab.index)) && Number(tab.index) > 0 ? Math.floor(Number(tab.index)) : 0
+      const title = typeof tab.title === 'string' && tab.title.trim().length > 0 ? tab.title.trim() : '(untitled)'
+      const url = typeof tab.url === 'string' ? tab.url.trim() : ''
+      const prefix = index > 0 ? `${index}. ` : '- '
+      lines.push(url ? `${prefix}${title} — ${url}` : `${prefix}${title}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
 const SYSTEM_PROMPT = `You are a macOS screen understanding assistant.
 
 You will receive:
@@ -233,7 +263,7 @@ export async function callClaude(
 
   userContent.push({
     type: 'text',
-    text: `Active application: ${activeWindow.appName}\nWindow title: ${activeWindow.windowTitle}\n\nPlease analyze the screenshot(s) and respond with the appropriate JSON format.`
+    text: `${buildActiveContextText(activeWindow)}\n\nPlease analyze the screenshot(s) and respond with the appropriate JSON format.`
   })
 
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`

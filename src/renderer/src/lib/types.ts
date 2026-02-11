@@ -20,6 +20,8 @@ export interface ElectronAPI {
   onShowResult: (callback: (result: DetectionResult) => void) => () => void
   onShowError: (callback: (message: string) => void) => () => void
   dismiss: () => void
+  panelEnterDetailView: () => void
+  panelExitDetailView: () => void
   clipboardWrite: (text: string) => void
   panelReady: () => void
   getSettings: () => Promise<AppSettings>
