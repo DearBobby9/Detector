@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BookmarkPlus, Check, ChevronDown, Copy, Mail, X } from 'lucide-react'
 import type { CaptureAnalysisResult, MemoryCandidate } from '@shared/types'
 
@@ -28,6 +28,7 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chromeTabsExpanded, setChromeTabsExpanded] = useState(false)
   const [chromeTabsPopoverOpen, setChromeTabsPopoverOpen] = useState(false)
+  const [expandedCandidateIndex, setExpandedCandidateIndex] = useState<number | null>(null)
 
   const emailDetected = Boolean(data.email?.detected)
   const emailDraftText =
@@ -65,6 +66,25 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     return `Memory candidates (${memoryCandidates.length})`
   }, [memoryCandidates.length])
 
+  const expandedCandidate = useMemo(() => {
+    if (expandedCandidateIndex == null) return null
+    const candidate = memoryCandidates[expandedCandidateIndex]
+    return candidate ?? null
+  }, [expandedCandidateIndex, memoryCandidates])
+
+  const expandedCandidateTabTitles = useMemo(() => {
+    if (expandedCandidateIndex == null || expandedCandidateIndex !== chromeTabsIndex) return []
+    if (!expandedCandidate || typeof expandedCandidate.details !== 'string') return []
+    return parseLineList(expandedCandidate.details)
+  }, [expandedCandidateIndex, chromeTabsIndex, expandedCandidate])
+
+  useEffect(() => {
+    if (expandedCandidateIndex == null) return
+    if (!memoryCandidates[expandedCandidateIndex]) {
+      setExpandedCandidateIndex(null)
+    }
+  }, [expandedCandidateIndex, memoryCandidates])
+
   const saveCandidate = async (candidate: MemoryCandidate, index: number) => {
     if (savingIndex !== null) return
     if (savedIndexes.has(index)) return
@@ -88,6 +108,15 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     }
   }
 
+  const openCandidateDetail = (index: number) => {
+    if (!Number.isFinite(index) || index < 0) return
+    setExpandedCandidateIndex(index)
+  }
+
+  const closeCandidateDetail = () => {
+    setExpandedCandidateIndex(null)
+  }
+
   const renderChromeTabsInline = () => {
     if (!chromeTabsCandidate) return null
 
@@ -98,7 +127,18 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     const remaining = Math.max(0, count - preview.length)
 
     return (
-      <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+      <div
+        className="rounded-lg bg-white/5 border border-white/10 p-3 cursor-pointer hover:bg-white/[0.07] transition-colors"
+        onClick={() => openCandidateDetail(chromeTabsIndex)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            openCandidateDetail(chromeTabsIndex)
+          }
+        }}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -115,7 +155,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
             </div>
 
             <button
-              onClick={() => setChromeTabsExpanded((v) => !v)}
+              onClick={(e) => {
+                e.stopPropagation()
+                setChromeTabsExpanded((v) => !v)
+              }}
               className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               aria-expanded={chromeTabsExpanded}
             >
@@ -141,7 +184,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
 
           <div className="shrink-0 flex items-center gap-1">
             <button
-              onClick={() => onCopy(formatCandidateForCopy(chromeTabsCandidate))}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCopy(formatCandidateForCopy(chromeTabsCandidate))
+              }}
               className="p-2 rounded-md hover:bg-white/10 transition-colors"
               aria-label="Copy"
               title="Copy"
@@ -149,7 +195,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
               <Copy className="h-4 w-4 text-muted-foreground" />
             </button>
             <button
-              onClick={() => void saveCandidate(chromeTabsCandidate, chromeTabsIndex)}
+              onClick={(e) => {
+                e.stopPropagation()
+                void saveCandidate(chromeTabsCandidate, chromeTabsIndex)
+              }}
               disabled={isSaved || isSaving}
               className="p-2 rounded-md hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               aria-label="Save"
@@ -189,7 +238,18 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     const remaining = Math.max(0, count - preview.length)
 
     return (
-      <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-2">
+      <div
+        className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-2 cursor-pointer hover:bg-white/[0.07] transition-colors"
+        onClick={() => openCandidateDetail(chromeTabsIndex)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            openCandidateDetail(chromeTabsIndex)
+          }
+        }}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-medium text-muted-foreground">Browser tabs</div>
@@ -203,13 +263,19 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
 
           <div className="shrink-0 flex items-center gap-1">
             <button
-              onClick={() => onCopy(chromeTabTitles.join('\n'))}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCopy(chromeTabTitles.join('\n'))
+              }}
               className="px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-[11px] text-muted-foreground hover:bg-white/10 transition-colors"
             >
               Copy
             </button>
             <button
-              onClick={() => void saveCandidate(chromeTabsCandidate, chromeTabsIndex)}
+              onClick={(e) => {
+                e.stopPropagation()
+                void saveCandidate(chromeTabsCandidate, chromeTabsIndex)
+              }}
               disabled={isSaved || isSaving}
               className="px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-[11px] text-muted-foreground hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
@@ -335,7 +401,16 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
                   return (
                     <div
                       key={`${c.kind}-${idx}-${c.title}`}
-                      className="rounded-lg bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3"
+                      className="rounded-lg bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3 cursor-pointer hover:bg-white/[0.07] transition-colors"
+                      onClick={() => openCandidateDetail(idx)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openCandidateDetail(idx)
+                        }
+                      }}
                     >
                       <div className="min-w-0">
                         <div className="flex items-baseline justify-between gap-3">
@@ -359,7 +434,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
 
                       <div className="shrink-0 flex items-center gap-1">
                         <button
-                          onClick={() => onCopy(formatCandidateForCopy(c))}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCopy(formatCandidateForCopy(c))
+                          }}
                           className="p-2 rounded-md hover:bg-white/10 transition-colors"
                           aria-label="Copy"
                           title="Copy"
@@ -367,7 +445,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
                           <Copy className="h-4 w-4 text-muted-foreground" />
                         </button>
                         <button
-                          onClick={() => void saveCandidate(c, idx)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void saveCandidate(c, idx)
+                          }}
                           disabled={isSaved || isSaving}
                           className="p-2 rounded-md hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                           aria-label="Save"
@@ -391,7 +472,16 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
                   return (
                     <div
                       key={`${c.kind}-${idx}-${c.title}`}
-                      className="rounded-lg bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3"
+                      className="rounded-lg bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3 cursor-pointer hover:bg-white/[0.07] transition-colors"
+                      onClick={() => openCandidateDetail(idx)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openCandidateDetail(idx)
+                        }
+                      }}
                     >
                       <div className="min-w-0">
                         <div className="flex items-baseline justify-between gap-3">
@@ -415,7 +505,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
 
                       <div className="shrink-0 flex items-center gap-1">
                         <button
-                          onClick={() => onCopy(formatCandidateForCopy(c))}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCopy(formatCandidateForCopy(c))
+                          }}
                           className="p-2 rounded-md hover:bg-white/10 transition-colors"
                           aria-label="Copy"
                           title="Copy"
@@ -423,7 +516,10 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
                           <Copy className="h-4 w-4 text-muted-foreground" />
                         </button>
                         <button
-                          onClick={() => void saveCandidate(c, idx)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void saveCandidate(c, idx)
+                          }}
                           disabled={isSaved || isSaving}
                           className="p-2 rounded-md hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                           aria-label="Save"
@@ -445,6 +541,93 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
           {saveError && <div className="mt-2 text-xs text-destructive">{saveError}</div>}
         </div>
       </div>
+
+      {expandedCandidate && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-3">
+          <button
+            className="absolute inset-0 bg-black/50 backdrop-blur-[1px]"
+            aria-label="Close candidate detail"
+            onClick={closeCandidateDetail}
+          />
+
+          <div className="relative w-full max-w-2xl max-h-[86vh] rounded-2xl bg-[hsl(var(--card))]/95 border border-white/10 shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 bg-white/5 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs text-muted-foreground">
+                  [{expandedCandidate.kind}]
+                  {typeof expandedCandidate.dueAt === 'string' && expandedCandidate.dueAt.trim()
+                    ? ` • ${expandedCandidate.dueAt}`
+                    : ''}
+                </div>
+                <div className="mt-1 text-base font-semibold text-foreground break-words">
+                  {expandedCandidate.title}
+                </div>
+              </div>
+              <button
+                onClick={closeCandidateDetail}
+                className="shrink-0 p-1.5 rounded-md hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[calc(86vh-136px)] space-y-4">
+              {typeof expandedCandidate.details === 'string' && expandedCandidate.details.trim().length > 0 ? (
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+                  <div className="text-xs font-medium text-muted-foreground">Details</div>
+                  <div className="mt-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground">
+                    {expandedCandidate.details}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3 text-sm text-muted-foreground">
+                  No extra details.
+                </div>
+              )}
+
+              {expandedCandidateTabTitles.length > 0 && (
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    Chrome tab titles ({expandedCandidateTabTitles.length})
+                  </div>
+                  <div className="mt-2 max-h-56 overflow-y-auto rounded-md bg-black/20 border border-white/10 p-2 space-y-1">
+                    {expandedCandidateTabTitles.map((title, index) => (
+                      <div key={`${index}-${title}`} className="text-xs leading-relaxed text-foreground/90 break-words">
+                        {index + 1}. {title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {typeof expandedCandidate.source === 'string' && expandedCandidate.source.trim().length > 0 && (
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+                  <div className="text-xs font-medium text-muted-foreground">Source</div>
+                  <div className="mt-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground/90">
+                    {expandedCandidate.source}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 py-3 border-t border-white/10 bg-white/5 flex items-center justify-end gap-2">
+              <button
+                onClick={() => onCopy(formatCandidateForCopy(expandedCandidate))}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-muted-foreground hover:bg-white/10 transition-colors"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => closeCandidateDetail()}
+                className="px-3 py-2 rounded-lg bg-white/10 border border-white/10 text-sm text-foreground hover:bg-white/15 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

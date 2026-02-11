@@ -231,3 +231,8 @@ The capture panel (top overlay) has two modes:
 
 - Collapsed: slim loading bar (`Analyzing your screen...`)
 - Expanded: full result view (email draft + memory candidates)
+- Memory candidate cards are clickable; clicking opens a detail modal with full, untruncated content.
+
+## UI Notes (Main Window)
+
+- The top area across both sidebar and main content is draggable (`-webkit-app-region: drag`) for easier window movement.

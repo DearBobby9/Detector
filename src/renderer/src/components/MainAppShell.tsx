@@ -1318,6 +1318,8 @@ export function MainAppShell() {
       </div>
 
       <section className="min-h-0 min-w-0 flex flex-col">
+        <div className="h-12 shrink-0 app-drag" />
+
         {route === 'home' && (
           <div className="flex-1 min-h-0 flex items-center justify-center px-12 py-14">
             <div className="w-full max-w-[480px] flex flex-col items-center text-center gap-5">
