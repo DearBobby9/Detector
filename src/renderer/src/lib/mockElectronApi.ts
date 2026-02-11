@@ -5,6 +5,7 @@ import type {
   DetectionResult,
   HistoryRecord,
   MemoryItem,
+  ScreenshotAsset,
   StorageCategoryUsage,
   StorageEnforceResult,
   StorageLimitUpdateResult,
@@ -72,6 +73,49 @@ function saveMemoryToStorage(items: MemoryItem[]): void {
   } catch {
     // ignore
   }
+}
+
+function createMockScreenshotDataUrl(asset: ScreenshotAsset, title: string): string {
+  const safeTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const safeDisplay = asset.displayId.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${asset.width}" height="${asset.height}" viewBox="0 0 ${asset.width} ${asset.height}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="55%" stop-color="#e2e8f0" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="${asset.width}" height="${asset.height}" fill="url(#bg)" />
+  <rect x="${Math.round(asset.width * 0.06)}" y="${Math.round(asset.height * 0.12)}" width="${Math.round(asset.width * 0.88)}" height="${Math.round(asset.height * 0.76)}" rx="${Math.round(asset.width * 0.02)}" fill="rgba(255,255,255,0.72)" stroke="#94a3b8" />
+  <text x="50%" y="46%" text-anchor="middle" fill="#1e293b" font-size="${Math.max(20, Math.round(asset.width * 0.03))}" font-family="ui-sans-serif, system-ui, -apple-system">Detector Screenshot</text>
+  <text x="50%" y="54%" text-anchor="middle" fill="#475569" font-size="${Math.max(14, Math.round(asset.width * 0.018))}" font-family="ui-sans-serif, system-ui, -apple-system">${safeDisplay}</text>
+  <text x="50%" y="62%" text-anchor="middle" fill="#64748b" font-size="${Math.max(13, Math.round(asset.width * 0.015))}" font-family="ui-sans-serif, system-ui, -apple-system">${safeTitle}</text>
+</svg>`.trim()
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+function buildMockScreenshotAssets(recordId: number): ScreenshotAsset[] {
+  const dir = `captures/${recordId}`
+  return [
+    {
+      displayId: 'Display 1',
+      relativePath: `${dir}/display-1.jpg`,
+      width: 2560,
+      height: 1440,
+      bytes: 268_000,
+      mime: 'image/jpeg'
+    },
+    {
+      displayId: 'Display 2',
+      relativePath: `${dir}/display-2.jpg`,
+      width: 1920,
+      height: 1080,
+      bytes: 182_000,
+      mime: 'image/jpeg'
+    }
+  ]
 }
 
 function makeMockHistory(): HistoryRecord[] {
@@ -186,13 +230,16 @@ function makeMockHistory(): HistoryRecord[] {
     } as any
   } as any
 
+  const captureRecordId = id++
   records.push({
-    id: id++,
+    id: captureRecordId,
     timestamp: now - 2 * 60 * 1000,
     activeApp: 'Google Chrome',
     windowTitle: 'Quorum (20 tabs)',
     resultType: capturePayload.type,
-    resultJson: JSON.stringify(capturePayload)
+    resultJson: JSON.stringify(capturePayload),
+    screenshots: buildMockScreenshotAssets(captureRecordId),
+    screenshotPersistedAt: now - 2 * 60 * 1000
   })
 
   return records.sort((a, b) => a.timestamp - b.timestamp)
@@ -209,9 +256,33 @@ export function createMockElectronAPI(): ElectronAPI {
   let memory = loadMemory()
   let nextMemoryId = (memory[memory.length - 1]?.id ?? 0) + 1
   const mockUserDataRoot = '/Users/you/Library/Application Support/detector'
-  const mockScreenshotsBytes = 0
+  const mockScreenshotDataByPath = new Map<string, string>()
+
+  const getRecordScreenshots = (record: HistoryRecord): ScreenshotAsset[] => {
+    return Array.isArray(record.screenshots) ? record.screenshots : []
+  }
+
+  const seedScreenshotDataForRecord = (record: HistoryRecord): void => {
+    const screenshots = getRecordScreenshots(record)
+    const title = record.windowTitle || `Capture ${record.id ?? ''}`.trim()
+    for (const asset of screenshots) {
+      if (!mockScreenshotDataByPath.has(asset.relativePath)) {
+        mockScreenshotDataByPath.set(asset.relativePath, createMockScreenshotDataUrl(asset, title))
+      }
+    }
+  }
+
+  for (const record of history) {
+    seedScreenshotDataForRecord(record)
+  }
 
   const getMockStorageUsage = (): StorageUsageSummary => {
+    const screenshotAssets = history.flatMap((record) => getRecordScreenshots(record))
+    const screenshotsBytes = screenshotAssets.reduce(
+      (sum, asset) => sum + (Number.isFinite(asset.bytes) ? Math.max(0, asset.bytes) : 0),
+      0
+    )
+
     const historyBytes = new Blob([JSON.stringify(history)]).size
     const memoryBytes = new Blob([JSON.stringify(memory)]).size
     const categories: StorageCategoryUsage[] = [
@@ -232,9 +303,9 @@ export function createMockElectronAPI(): ElectronAPI {
       {
         key: 'screenshots',
         label: 'Screenshots',
-        bytes: mockScreenshotsBytes,
+        bytes: screenshotsBytes,
         path: `${mockUserDataRoot}/captures`,
-        itemCount: 0
+        itemCount: screenshotAssets.length
       }
     ]
     const usedBytes = categories.reduce((sum, c) => sum + c.bytes, 0)
@@ -246,7 +317,7 @@ export function createMockElectronAPI(): ElectronAPI {
       percent,
       isOverLimit: usedBytes > maxBytes,
       categories,
-      prunableBytes: historyBytes + mockScreenshotsBytes
+      prunableBytes: historyBytes + screenshotsBytes
     }
   }
 
@@ -343,17 +414,22 @@ export function createMockElectronAPI(): ElectronAPI {
         ]
       }
 
-      history = [
-        ...history,
-        {
-          id: nextHistoryId++,
-          timestamp: Date.now(),
-          activeApp: 'Browser Preview',
-          windowTitle: result.screenTitle,
-          resultType: result.type,
-          resultJson: JSON.stringify(result)
-        }
-      ]
+      const id = nextHistoryId++
+      const screenshots = buildMockScreenshotAssets(id)
+      const createdAt = Date.now()
+      const record: HistoryRecord = {
+        id,
+        timestamp: createdAt,
+        activeApp: 'Browser Preview',
+        windowTitle: result.screenTitle,
+        resultType: result.type,
+        resultJson: JSON.stringify(result),
+        screenshots,
+        screenshotPersistedAt: createdAt
+      }
+
+      history = [...history, record]
+      seedScreenshotDataForRecord(record)
 
       for (const cb of resultListeners) cb(result)
       return { ok: true }
@@ -385,6 +461,31 @@ export function createMockElectronAPI(): ElectronAPI {
       await sleep(280)
       return { ok: true, text: `Mock reply (browser preview): ${last.slice(0, 80)}` }
     },
+    readCaptureImageData: async (
+      relativePath: string
+    ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; path?: string; message?: string }> => {
+      const trimmed = String(relativePath || '').trim()
+      if (!trimmed) {
+        return { ok: false, message: 'Empty image path' }
+      }
+
+      const asset = history.flatMap((record) => getRecordScreenshots(record)).find((item) => item.relativePath === trimmed)
+      if (!asset) {
+        return { ok: false, path: `${mockUserDataRoot}/${trimmed}`, message: 'File not found' }
+      }
+
+      const dataUrl = mockScreenshotDataByPath.get(trimmed) ?? createMockScreenshotDataUrl(asset, 'Detector Screenshot')
+      if (!mockScreenshotDataByPath.has(trimmed)) {
+        mockScreenshotDataByPath.set(trimmed, dataUrl)
+      }
+
+      return {
+        ok: true,
+        dataUrl,
+        bytes: asset.bytes,
+        path: `${mockUserDataRoot}/${trimmed}`
+      }
+    },
     getStorageUsage: async (): Promise<StorageUsageSummary> => {
       return getMockStorageUsage()
     },
@@ -397,15 +498,27 @@ export function createMockElectronAPI(): ElectronAPI {
     enforceStorageLimit: async (): Promise<StorageEnforceResult> => {
       const before = getMockStorageUsage()
       let deletedRecords = 0
+      let deletedScreenshotFiles = 0
+      let deletedScreenshotDirs = 0
 
       while (history.length > 0 && getMockStorageUsage().usedBytes > settings.maxStorageBytes) {
-        history.shift()
+        const removed = history.shift()
+        if (removed) {
+          const screenshots = getRecordScreenshots(removed)
+          deletedScreenshotFiles += screenshots.length
+          if (screenshots.length > 0) deletedScreenshotDirs += 1
+          for (const asset of screenshots) {
+            mockScreenshotDataByPath.delete(asset.relativePath)
+          }
+        }
         deletedRecords += 1
       }
 
       const after = getMockStorageUsage()
       return {
         deletedRecords,
+        deletedScreenshotFiles,
+        deletedScreenshotDirs,
         reclaimedBytes: Math.max(0, before.usedBytes - after.usedBytes),
         usedBytes: after.usedBytes,
         maxBytes: after.maxBytes,

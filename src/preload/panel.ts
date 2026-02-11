@@ -73,6 +73,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC.CHAT_SEND, payload)
   },
 
+  readCaptureImageData: (
+    relativePath: string
+  ): Promise<{ ok: boolean; dataUrl?: string; bytes?: number; path?: string; message?: string }> => {
+    return ipcRenderer.invoke(IPC.CAPTURE_READ_IMAGE_DATA, relativePath)
+  },
+
   getStorageUsage: (): Promise<StorageUsageSummary> => {
     return ipcRenderer.invoke(IPC.STORAGE_GET_USAGE)
   },

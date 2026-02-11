@@ -8,10 +8,11 @@ import { registerHotkey, unregisterHotkey } from './hotkey'
 import { captureAllScreens } from './screenshot'
 import { getActiveWindow } from './active-window'
 import { callClaude } from './claude-api'
-import { saveRecord } from './database'
+import { saveRecord, updateRecordScreenshots } from './database'
 import { createAppWindow, getAppWindow, showAppWindow } from './app-window'
 import { createTray } from './tray'
 import { enforceStorageLimit } from './storage'
+import { persistCaptureScreenshots } from './capture-storage'
 
 // Load .env from project root
 config({ path: join(__dirname, '../../.env') })
@@ -132,7 +133,7 @@ async function orchestrateCapture(): Promise<void> {
     broadcastToRenderers(IPC.PANEL_SHOW_RESULT, result)
 
     // Save to history
-    saveRecord({
+    const savedRecord = saveRecord({
       timestamp: Date.now(),
       activeApp: activeWindow.appName,
       windowTitle: activeWindow.windowTitle,
@@ -140,6 +141,18 @@ async function orchestrateCapture(): Promise<void> {
       resultJson: JSON.stringify(result),
       resultText: formatResultText(result)
     })
+
+    if (typeof savedRecord.id === 'number') {
+      try {
+        const assets = persistCaptureScreenshots(savedRecord.id, screenshots)
+        if (assets.length > 0) {
+          updateRecordScreenshots(savedRecord.id, assets)
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.warn(`[CaptureStorage] Failed to persist capture assets for #${savedRecord.id}: ${reason}`)
+      }
+    }
 
     const cleanup = enforceStorageLimit()
     if (cleanup.deletedRecords > 0 || cleanup.reclaimedBytes > 0) {

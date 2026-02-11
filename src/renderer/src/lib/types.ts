@@ -30,6 +30,9 @@ export interface ElectronAPI {
   getMemory: () => Promise<MemoryItem[]>
   saveMemory: (payload: Omit<MemoryItem, 'id' | 'createdAt'>) => Promise<MemoryItem>
   chatSend: (payload: { contextText: string; messages: ChatMessage[] }) => Promise<{ ok: boolean; text: string }>
+  readCaptureImageData: (
+    relativePath: string
+  ) => Promise<{ ok: boolean; dataUrl?: string; bytes?: number; path?: string; message?: string }>
   getStorageUsage: () => Promise<StorageUsageSummary>
   setStorageLimit: (maxStorageBytes: number) => Promise<StorageLimitUpdateResult>
   enforceStorageLimit: () => Promise<StorageEnforceResult>

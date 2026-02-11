@@ -25,6 +25,8 @@ export interface StorageUsageSummary {
 
 export interface StorageEnforceResult {
   deletedRecords: number
+  deletedScreenshotFiles?: number
+  deletedScreenshotDirs?: number
   reclaimedBytes: number
   usedBytes: number
   maxBytes: number
@@ -42,6 +44,15 @@ export interface ScreenCapture {
   base64: string // JPEG base64
   width: number
   height: number
+}
+
+export interface ScreenshotAsset {
+  displayId: string
+  relativePath: string
+  width: number
+  height: number
+  bytes: number
+  mime: 'image/jpeg'
 }
 
 export interface EmailReplyResult {
@@ -119,6 +130,8 @@ export interface HistoryRecord {
   resultType: string
   resultJson: string
   resultText?: string
+  screenshots?: ScreenshotAsset[]
+  screenshotPersistedAt?: number
 }
 
 export interface AppSettings {

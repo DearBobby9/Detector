@@ -264,6 +264,10 @@ export function MainAppShell() {
   const [chatInput, setChatInput] = useState('')
   const [isChatting, setIsChatting] = useState(false)
   const [isContextModalOpen, setIsContextModalOpen] = useState(false)
+  const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState(0)
+  const [screenshotDataCache, setScreenshotDataCache] = useState<Record<string, string>>({})
+  const [isLoadingScreenshotPreview, setIsLoadingScreenshotPreview] = useState(false)
+  const [screenshotPreviewError, setScreenshotPreviewError] = useState<string | null>(null)
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
@@ -273,6 +277,9 @@ export function MainAppShell() {
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null)
   const [showSidebarTopFade, setShowSidebarTopFade] = useState(false)
   const [showSidebarBottomFade, setShowSidebarBottomFade] = useState(false)
+  const settingsScrollRef = useRef<HTMLDivElement | null>(null)
+  const [showSettingsTopFade, setShowSettingsTopFade] = useState(false)
+  const [showSettingsBottomFade, setShowSettingsBottomFade] = useState(false)
 
   const chatEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -285,6 +292,17 @@ export function MainAppShell() {
 
     setShowSidebarTopFade(nextTop)
     setShowSidebarBottomFade(nextBottom)
+  }
+
+  const updateSettingsScrollFades = () => {
+    const el = settingsScrollRef.current
+    if (!el) return
+
+    const nextTop = el.scrollTop > 0
+    const nextBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+
+    setShowSettingsTopFade(nextTop)
+    setShowSettingsBottomFade(nextBottom)
   }
 
   const getMaxSidebarWidth = (): number => {
@@ -620,6 +638,28 @@ export function MainAppShell() {
     updateSidebarScrollFades()
   }, [isLoadingHistory, history.length, sidebarQuery, sidebarWidth])
 
+  useEffect(() => {
+    if (route !== 'settings') return
+    const el = settingsScrollRef.current
+    if (!el) return
+
+    updateSettingsScrollFades()
+
+    const onScroll = () => updateSettingsScrollFades()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [route, settingsSection])
+
+  useEffect(() => {
+    if (route !== 'settings') return
+    updateSettingsScrollFades()
+  }, [route, settingsSection, isLoadingSettings, isLoadingStorage, storageUsage])
+
   const canSave = useMemo(() => {
     return settings.apiBaseUrl.trim().length > 0 && settings.apiModel.trim().length > 0
   }, [settings.apiBaseUrl, settings.apiModel])
@@ -687,6 +727,81 @@ export function MainAppShell() {
 
     return { activeApp, windowTitle, activeUrl, tabs, capturedAt }
   }, [activeRecord, activePayload])
+
+  const activeScreenshots = useMemo(() => {
+    if (!activeRecord || !Array.isArray(activeRecord.screenshots)) return []
+    return activeRecord.screenshots
+  }, [activeRecord])
+
+  const selectedScreenshot = useMemo(() => {
+    if (activeScreenshots.length === 0) return null
+    const index = clampNumber(selectedScreenshotIndex, 0, activeScreenshots.length - 1)
+    return activeScreenshots[index] || null
+  }, [activeScreenshots, selectedScreenshotIndex])
+
+  const selectedScreenshotPath = selectedScreenshot?.relativePath ?? ''
+  const selectedScreenshotDataUrl =
+    selectedScreenshotPath.length > 0 ? screenshotDataCache[selectedScreenshotPath] : undefined
+
+  const contextModalEnabled = Boolean(activeRecord)
+
+  useEffect(() => {
+    if (!isContextModalOpen) return
+    setSelectedScreenshotIndex(0)
+    setScreenshotPreviewError(null)
+  }, [isContextModalOpen, activeRecord?.id])
+
+  useEffect(() => {
+    if (activeScreenshots.length === 0) {
+      setSelectedScreenshotIndex(0)
+      return
+    }
+    setSelectedScreenshotIndex((prev) => clampNumber(prev, 0, activeScreenshots.length - 1))
+  }, [activeScreenshots.length])
+
+  useEffect(() => {
+    if (!isContextModalOpen) return
+    if (!selectedScreenshotPath) {
+      setIsLoadingScreenshotPreview(false)
+      setScreenshotPreviewError(null)
+      return
+    }
+    if (typeof selectedScreenshotDataUrl === 'string' && selectedScreenshotDataUrl.length > 0) {
+      setIsLoadingScreenshotPreview(false)
+      setScreenshotPreviewError(null)
+      return
+    }
+
+    let cancelled = false
+    setIsLoadingScreenshotPreview(true)
+    setScreenshotPreviewError(null)
+
+    void window.electronAPI
+      .readCaptureImageData(selectedScreenshotPath)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok && typeof result.dataUrl === 'string' && result.dataUrl.length > 0) {
+          setScreenshotDataCache((prev) => ({ ...prev, [selectedScreenshotPath]: result.dataUrl as string }))
+          setScreenshotPreviewError(null)
+          return
+        }
+        setScreenshotPreviewError(result.message || 'Failed to load screenshot preview')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : String(error)
+        setScreenshotPreviewError(message || 'Failed to load screenshot preview')
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingScreenshotPreview(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isContextModalOpen, selectedScreenshotPath, selectedScreenshotDataUrl])
 
   const activeMetadataText = useMemo(() => {
     if (!activeMetadata) return ''
@@ -1274,14 +1389,16 @@ export function MainAppShell() {
                 </button>
               </div>
 
-              <div className="mt-6 flex-1 min-h-0 overflow-y-auto pr-2 space-y-6">
-                {isLoadingSettings ? (
-                  <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6 text-sm text-slate-500 flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading settings...
-                  </div>
-                ) : (
-                  <>
+              <div className="mt-6 flex-1 min-h-0 pr-2">
+                <div className="relative h-full min-h-0">
+                  <div ref={settingsScrollRef} className="h-full overflow-y-auto pr-1 space-y-6">
+                    {isLoadingSettings ? (
+                      <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6 text-sm text-slate-500 flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading settings...
+                      </div>
+                    ) : (
+                      <>
                     {settingsSection === 'general' && (
                       <>
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
@@ -1546,8 +1663,24 @@ export function MainAppShell() {
                         )}
                       </div>
                     )}
-                  </>
-                )}
+                      </>
+                    )}
+                  </div>
+                  <div
+                    className={cn(
+                      'pointer-events-none absolute left-0 right-1 top-0 h-8 bg-gradient-to-b from-[#eef2f6]/95 to-transparent',
+                      'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+                      showSettingsTopFade ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                  <div
+                    className={cn(
+                      'pointer-events-none absolute left-0 right-1 bottom-0 h-8 bg-gradient-to-t from-[#eef2f6]/95 to-transparent',
+                      'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+                      showSettingsBottomFade ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                </div>
               </div>
 
               <div className="mt-6 rounded-2xl bg-white/80 border border-slate-200/70 shadow-sm px-4 py-3 flex items-center justify-between gap-3">
@@ -1735,13 +1868,18 @@ export function MainAppShell() {
                               {activeMetadata.tabs.length} tabs
                             </span>
                           )}
+                          {activeScreenshots.length > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600 tabular-nums">
+                              {activeScreenshots.length} screenshot{activeScreenshots.length === 1 ? '' : 's'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
                         <button
                           onClick={() => setIsContextModalOpen(true)}
-                          disabled={!activeMetadata}
+                          disabled={!contextModalEnabled}
                           className="app-nodrag inline-flex items-center justify-center rounded-xl bg-white border border-slate-200/70 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
                         >
                           View
@@ -1770,7 +1908,8 @@ export function MainAppShell() {
                             <div className="min-w-0">
                               <div className="text-xs text-slate-400">Metadata</div>
                               <div className="text-sm font-semibold text-slate-800 truncate">
-                                {activeMetadata.activeApp} · {activeMetadata.windowTitle}
+                                {(activeMetadata?.activeApp || activeRecord?.activeApp || 'Unknown app')} ·{' '}
+                                {(activeMetadata?.windowTitle || activeRecord?.windowTitle || 'Unknown window')}
                               </div>
                             </div>
                             <button
@@ -1784,13 +1923,65 @@ export function MainAppShell() {
 
                           <div className="p-4 space-y-4">
                             <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                              <div className="aspect-[16/9] bg-[radial-gradient(800px_260px_at_35%_35%,rgba(110,143,149,0.20)_0%,rgba(255,255,255,0)_60%),linear-gradient(180deg,rgba(255,255,255,0.70)_0%,rgba(241,245,249,0.95)_100%)] flex items-center justify-center">
-                                <div className="text-center px-6">
-                                  <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
-                                  <div className="mt-2 text-sm font-semibold text-slate-700">Screenshot preview</div>
-                                  <div className="mt-1 text-xs text-slate-500">(Not stored yet)</div>
+                              {activeScreenshots.length > 0 && (
+                                <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center gap-2 flex-wrap">
+                                  {activeScreenshots.map((asset, idx) => (
+                                    <button
+                                      key={`${asset.relativePath}-${idx}`}
+                                      onClick={() => setSelectedScreenshotIndex(idx)}
+                                      className={cn(
+                                        'app-nodrag inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] transition',
+                                        idx === selectedScreenshotIndex
+                                          ? 'bg-[#6e8f95] text-white border-[#6e8f95]'
+                                          : 'bg-white/80 text-slate-600 border-slate-200/70 hover:bg-slate-50'
+                                      )}
+                                    >
+                                      {asset.displayId || `Display ${idx + 1}`}
+                                    </button>
+                                  ))}
                                 </div>
+                              )}
+
+                              <div className="aspect-[16/9] bg-[radial-gradient(800px_260px_at_35%_35%,rgba(110,143,149,0.20)_0%,rgba(255,255,255,0)_60%),linear-gradient(180deg,rgba(255,255,255,0.70)_0%,rgba(241,245,249,0.95)_100%)] flex items-center justify-center overflow-hidden">
+                                {activeScreenshots.length === 0 ? (
+                                  <div className="text-center px-6">
+                                    <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
+                                    <div className="mt-2 text-sm font-semibold text-slate-700">Screenshot preview</div>
+                                    <div className="mt-1 text-xs text-slate-500">(No persisted screenshot)</div>
+                                  </div>
+                                ) : isLoadingScreenshotPreview && !selectedScreenshotDataUrl ? (
+                                  <div className="text-center px-6">
+                                    <Loader2 className="h-7 w-7 text-slate-500 mx-auto animate-spin" />
+                                    <div className="mt-2 text-sm font-semibold text-slate-700">Loading screenshot</div>
+                                  </div>
+                                ) : selectedScreenshotDataUrl ? (
+                                  <img
+                                    src={selectedScreenshotDataUrl}
+                                    alt={`Screenshot ${selectedScreenshotIndex + 1}`}
+                                    className="h-full w-full object-contain"
+                                  />
+                                ) : (
+                                  <div className="text-center px-6">
+                                    <Monitor className="h-7 w-7 text-slate-500 mx-auto" />
+                                    <div className="mt-2 text-sm font-semibold text-slate-700">Preview unavailable</div>
+                                    {screenshotPreviewError && (
+                                      <div className="mt-1 text-xs text-rose-500">{screenshotPreviewError}</div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
+
+                              {selectedScreenshot && (
+                                <div className="px-4 py-3 border-t border-slate-200/60 text-xs text-slate-500 flex items-center justify-between gap-3">
+                                  <div className="truncate">
+                                    {selectedScreenshot.displayId || `Display ${selectedScreenshotIndex + 1}`} ·{' '}
+                                    {selectedScreenshot.width}×{selectedScreenshot.height}
+                                  </div>
+                                  <div className="tabular-nums shrink-0">
+                                    {formatBytes(selectedScreenshot.bytes)}
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4 text-sm text-slate-700 space-y-1">
@@ -1800,11 +1991,11 @@ export function MainAppShell() {
                               </div>
                               <div className="break-all">
                                 <span className="text-slate-400">Active URL:</span>{' '}
-                                {activeMetadata.activeUrl ? activeMetadata.activeUrl : '—'}
+                                {activeMetadata?.activeUrl ? activeMetadata.activeUrl : '—'}
                               </div>
                             </div>
 
-                            {activeMetadata.tabs.length > 0 && (
+                            {activeMetadata && activeMetadata.tabs.length > 0 && (
                               <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
                                 <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
                                   <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">

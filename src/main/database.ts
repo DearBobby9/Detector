@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { HistoryRecord } from '@shared/types'
+import { HistoryRecord, ScreenshotAsset } from '@shared/types'
 
 const DB_FILE = join(app.getPath('userData'), 'history.json')
 
@@ -22,18 +22,16 @@ export function getHistoryDbPath(): string {
   return DB_FILE
 }
 
-export function saveRecord(record: Omit<HistoryRecord, 'id'>): void {
+export function saveRecord(record: Omit<HistoryRecord, 'id'>): HistoryRecord {
   const records = readDb()
   const newRecord: HistoryRecord = {
     ...record,
     id: records.length > 0 ? Math.max(...records.map((r) => r.id || 0)) + 1 : 1
   }
   records.push(newRecord)
-
-  // Keep only last 100 records
-  const trimmed = records.slice(-100)
-  writeDb(trimmed)
+  writeDb(records)
   console.log('[Database] Saved record #' + newRecord.id, record.resultType)
+  return newRecord
 }
 
 export function getHistory(): HistoryRecord[] {
@@ -42,4 +40,20 @@ export function getHistory(): HistoryRecord[] {
 
 export function replaceHistory(records: HistoryRecord[]): void {
   writeDb(records)
+}
+
+export function updateRecordScreenshots(recordId: number, screenshots: ScreenshotAsset[]): HistoryRecord | null {
+  if (!Number.isFinite(recordId) || recordId <= 0) return null
+  const records = readDb()
+  const index = records.findIndex((r) => r.id === recordId)
+  if (index < 0) return null
+
+  const updated: HistoryRecord = {
+    ...records[index],
+    screenshots: Array.isArray(screenshots) ? screenshots : [],
+    screenshotPersistedAt: Date.now()
+  }
+  records[index] = updated
+  writeDb(records)
+  return updated
 }

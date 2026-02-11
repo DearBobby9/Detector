@@ -3,13 +3,13 @@ import { dirname, join } from 'path'
 import {
   existsSync,
   readdirSync,
-  rmSync,
   statSync
 } from 'fs'
 import type { AppSettings, StorageCategory, StorageCategoryUsage, StorageEnforceResult, StorageUsageSummary } from '@shared/types'
 import { getHistory, getHistoryDbPath, replaceHistory } from './database'
 import { getMemoryDbPath, listMemory } from './memory-database'
 import { getSettings, saveSettings } from './settings'
+import { deleteCaptureAssetsForRecord } from './capture-storage'
 
 const MIN_MAX_STORAGE_BYTES = 50 * 1024 * 1024
 const MAX_MAX_STORAGE_BYTES = 5 * 1024 * 1024 * 1024
@@ -136,47 +136,14 @@ export function setMaxStorageBytes(maxStorageBytes: number): AppSettings {
   return saveSettings({ maxStorageBytes: clampStorageLimit(maxStorageBytes) })
 }
 
-function cleanupScreenshotsUntilBelowLimit(limitBytes: number): void {
-  const screenshotsDir = getStoragePaths().screenshotsDir
-  if (!existsSync(screenshotsDir)) return
-
-  let used = getStorageUsage().usedBytes
-  if (used <= limitBytes) return
-
-  let entries: Array<{ path: string; mtimeMs: number }> = []
-  try {
-    entries = readdirSync(screenshotsDir, { withFileTypes: true })
-      .map((entry) => {
-        const fullPath = join(screenshotsDir, entry.name)
-        try {
-          return { path: fullPath, mtimeMs: statSync(fullPath).mtimeMs }
-        } catch {
-          return null
-        }
-      })
-      .filter((value): value is { path: string; mtimeMs: number } => value !== null)
-      .sort((a, b) => a.mtimeMs - b.mtimeMs)
-  } catch {
-    entries = []
-  }
-
-  for (const entry of entries) {
-    if (used <= limitBytes) break
-    try {
-      rmSync(entry.path, { recursive: true, force: true })
-    } catch {
-      // ignore deletion failure
-    }
-    used = getStorageUsage().usedBytes
-  }
-}
-
 export function enforceStorageLimit(): StorageEnforceResult {
   const before = getStorageUsage()
   const maxBytes = before.maxBytes
   if (!before.isOverLimit) {
     return {
       deletedRecords: 0,
+      deletedScreenshotFiles: 0,
+      deletedScreenshotDirs: 0,
       reclaimedBytes: 0,
       usedBytes: before.usedBytes,
       maxBytes,
@@ -185,21 +152,23 @@ export function enforceStorageLimit(): StorageEnforceResult {
     }
   }
 
-  const records = getHistory()
+  const records = [...getHistory()].sort((a, b) => a.timestamp - b.timestamp)
   let deletedRecords = 0
-  let working = [...records].sort((a, b) => a.timestamp - b.timestamp)
+  let deletedScreenshotFiles = 0
+  let deletedScreenshotDirs = 0
+  let working = [...records]
 
-  while (working.length > 0 && getStorageUsage().usedBytes > maxBytes) {
-    working.shift()
+  while (working.length > 0) {
+    const usage = getStorageUsage()
+    if (usage.usedBytes <= maxBytes) break
+
+    const oldest = working.shift()
+    if (!oldest) break
+    const assetCleanup = deleteCaptureAssetsForRecord(oldest)
+    deletedScreenshotFiles += assetCleanup.deletedFiles
+    deletedScreenshotDirs += assetCleanup.deletedDirs
     deletedRecords += 1
-  }
-
-  if (deletedRecords > 0) {
     replaceHistory(working)
-  }
-
-  if (getStorageUsage().usedBytes > maxBytes) {
-    cleanupScreenshotsUntilBelowLimit(maxBytes)
   }
 
   const after = getStorageUsage()
@@ -207,6 +176,8 @@ export function enforceStorageLimit(): StorageEnforceResult {
 
   return {
     deletedRecords,
+    deletedScreenshotFiles,
+    deletedScreenshotDirs,
     reclaimedBytes,
     usedBytes: after.usedBytes,
     maxBytes: after.maxBytes,

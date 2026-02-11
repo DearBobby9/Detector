@@ -13,6 +13,7 @@ import {
   revealStoragePath,
   setMaxStorageBytes
 } from './storage'
+import { readCaptureImageData } from './capture-storage'
 
 interface IpcHandlerActions {
   triggerCapture: () => Promise<void>
@@ -75,6 +76,10 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
       return { ok: true, text }
     }
   )
+
+  ipcMain.handle(IPC.CAPTURE_READ_IMAGE_DATA, (_event, relativePath: string) => {
+    return readCaptureImageData(relativePath)
+  })
 
   ipcMain.handle(IPC.STORAGE_GET_USAGE, () => {
     return getStorageUsage()

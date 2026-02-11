@@ -68,9 +68,9 @@ In packaged mode, Detector stores JSON files under:
 
 Files:
 
-- `history.json` - last 100 captures (raw model JSON + a text summary for chat context)
+- `history.json` - capture records (raw model JSON + text context), auto-pruned by Storage limit policy
 - `memory.json` - saved memory items you confirmed from the capture panel
-- `captures/` - screenshot storage root (reserved path; currently may be empty)
+- `captures/` - persisted screenshot assets for each capture (`captures/<recordId>/display-<n>.jpg`)
 
 ## Storage Management
 
@@ -89,7 +89,7 @@ Files:
 Storage policy:
 
 - limit applies to all categories
-- when over limit, Detector auto-prunes **oldest captures/history first**
+- when over limit, Detector auto-prunes **oldest captures first** (history record + its screenshot files)
 - Detector never auto-deletes saved memory items
 - manual cleanup can be triggered from the Storage tab
 

@@ -13,6 +13,7 @@ export const IPC = {
   MEMORY_LIST: 'memory:list',
   MEMORY_SAVE: 'memory:save',
   CHAT_SEND: 'chat:send',
+  CAPTURE_READ_IMAGE_DATA: 'capture:read-image-data',
   STORAGE_GET_USAGE: 'storage:get-usage',
   STORAGE_SET_LIMIT: 'storage:set-limit',
   STORAGE_ENFORCE_LIMIT: 'storage:enforce-limit',
