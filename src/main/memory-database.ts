@@ -18,6 +18,10 @@ function writeDb(records: MemoryItem[]): void {
   writeFileSync(DB_FILE, JSON.stringify(records, null, 2))
 }
 
+export function getMemoryDbPath(): string {
+  return DB_FILE
+}
+
 export function listMemory(): MemoryItem[] {
   return readDb()
 }
@@ -34,4 +38,3 @@ export function saveMemory(item: Omit<MemoryItem, 'id'>): MemoryItem {
   console.log('[MemoryDB] Saved item #' + newRecord.id, newRecord.kind, newRecord.title)
   return newRecord
 }
-

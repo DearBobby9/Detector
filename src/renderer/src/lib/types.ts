@@ -1,4 +1,13 @@
-import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord, MemoryItem } from '@shared/types'
+import type {
+  AppSettings,
+  ChatMessage,
+  DetectionResult,
+  HistoryRecord,
+  MemoryItem,
+  StorageEnforceResult,
+  StorageLimitUpdateResult,
+  StorageUsageSummary
+} from '@shared/types'
 
 export type PanelState =
   | { status: 'hidden' }
@@ -21,6 +30,11 @@ export interface ElectronAPI {
   getMemory: () => Promise<MemoryItem[]>
   saveMemory: (payload: Omit<MemoryItem, 'id' | 'createdAt'>) => Promise<MemoryItem>
   chatSend: (payload: { contextText: string; messages: ChatMessage[] }) => Promise<{ ok: boolean; text: string }>
+  getStorageUsage: () => Promise<StorageUsageSummary>
+  setStorageLimit: (maxStorageBytes: number) => Promise<StorageLimitUpdateResult>
+  enforceStorageLimit: () => Promise<StorageEnforceResult>
+  revealStoragePath: (categoryOrPath: string) => Promise<{ ok: boolean; path: string }>
+  copyStoragePath: (categoryOrPath: string) => Promise<{ ok: boolean; path: string }>
 }
 
 declare global {

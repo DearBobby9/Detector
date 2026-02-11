@@ -18,6 +18,10 @@ function writeDb(records: HistoryRecord[]): void {
   writeFileSync(DB_FILE, JSON.stringify(records, null, 2))
 }
 
+export function getHistoryDbPath(): string {
+  return DB_FILE
+}
+
 export function saveRecord(record: Omit<HistoryRecord, 'id'>): void {
   const records = readDb()
   const newRecord: HistoryRecord = {
@@ -34,4 +38,8 @@ export function saveRecord(record: Omit<HistoryRecord, 'id'>): void {
 
 export function getHistory(): HistoryRecord[] {
   return readDb()
+}
+
+export function replaceHistory(records: HistoryRecord[]): void {
+  writeDb(records)
 }

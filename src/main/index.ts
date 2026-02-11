@@ -11,6 +11,7 @@ import { callClaude } from './claude-api'
 import { saveRecord } from './database'
 import { createAppWindow, getAppWindow, showAppWindow } from './app-window'
 import { createTray } from './tray'
+import { enforceStorageLimit } from './storage'
 
 // Load .env from project root
 config({ path: join(__dirname, '../../.env') })
@@ -139,6 +140,11 @@ async function orchestrateCapture(): Promise<void> {
       resultJson: JSON.stringify(result),
       resultText: formatResultText(result)
     })
+
+    const cleanup = enforceStorageLimit()
+    if (cleanup.deletedRecords > 0 || cleanup.reclaimedBytes > 0) {
+      console.log('[Storage] Auto-prune complete:', cleanup)
+    }
 
     console.log('[Main] Orchestration complete:', result.type)
   } catch (error) {

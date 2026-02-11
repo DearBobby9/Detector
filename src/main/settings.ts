@@ -5,9 +5,13 @@ import { AppSettings } from '@shared/types'
 
 const SETTINGS_FILE = join(app.getPath('userData'), 'settings.json')
 const DEFAULT_TIMEOUT_MS = 30000
+const DEFAULT_MAX_STORAGE_BYTES = 512 * 1024 * 1024
+const MIN_MAX_STORAGE_BYTES = 50 * 1024 * 1024
+const MAX_MAX_STORAGE_BYTES = 5 * 1024 * 1024 * 1024
 
 function getDefaultSettings(): AppSettings {
   const timeoutFromEnv = Number(process.env.API_TIMEOUT_MS)
+  const maxStorageFromEnv = Number(process.env.MAX_STORAGE_BYTES)
 
   return {
     apiBaseUrl: (process.env.API_BASE_URL || 'https://api.openai.com/v1').trim(),
@@ -16,7 +20,13 @@ function getDefaultSettings(): AppSettings {
     apiTimeoutMs:
       Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0
         ? Math.floor(timeoutFromEnv)
-        : DEFAULT_TIMEOUT_MS
+        : DEFAULT_TIMEOUT_MS,
+    maxStorageBytes:
+      Number.isFinite(maxStorageFromEnv) &&
+      maxStorageFromEnv >= MIN_MAX_STORAGE_BYTES &&
+      maxStorageFromEnv <= MAX_MAX_STORAGE_BYTES
+        ? Math.floor(maxStorageFromEnv)
+        : DEFAULT_MAX_STORAGE_BYTES
   }
 }
 
@@ -49,12 +59,21 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     Number.isFinite(timeoutCandidate) && timeoutCandidate > 0
       ? Math.floor(timeoutCandidate)
       : defaults.apiTimeoutMs
+  const storageCandidate =
+    typeof input.maxStorageBytes === 'number'
+      ? input.maxStorageBytes
+      : Number((input as Partial<AppSettings> & { maxStorageBytes?: string }).maxStorageBytes)
+  const maxStorageBytes =
+    Number.isFinite(storageCandidate) && storageCandidate > 0
+      ? Math.min(MAX_MAX_STORAGE_BYTES, Math.max(MIN_MAX_STORAGE_BYTES, Math.floor(storageCandidate)))
+      : defaults.maxStorageBytes
 
   return {
     apiBaseUrl,
     apiKey,
     apiModel,
-    apiTimeoutMs
+    apiTimeoutMs,
+    maxStorageBytes
   }
 }
 

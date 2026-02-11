@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import { AppSettings, DetectionResult, MemoryItem } from '@shared/types'
+import {
+  AppSettings,
+  DetectionResult,
+  MemoryItem,
+  StorageEnforceResult,
+  StorageLimitUpdateResult,
+  StorageUsageSummary
+} from '@shared/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onShowLoading: (callback: () => void) => {
@@ -64,5 +71,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   chatSend: (payload: { contextText: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }) => {
     return ipcRenderer.invoke(IPC.CHAT_SEND, payload)
+  },
+
+  getStorageUsage: (): Promise<StorageUsageSummary> => {
+    return ipcRenderer.invoke(IPC.STORAGE_GET_USAGE)
+  },
+
+  setStorageLimit: (maxStorageBytes: number): Promise<StorageLimitUpdateResult> => {
+    return ipcRenderer.invoke(IPC.STORAGE_SET_LIMIT, maxStorageBytes)
+  },
+
+  enforceStorageLimit: (): Promise<StorageEnforceResult> => {
+    return ipcRenderer.invoke(IPC.STORAGE_ENFORCE_LIMIT)
+  },
+
+  revealStoragePath: (categoryOrPath: string): Promise<{ ok: boolean; path: string }> => {
+    return ipcRenderer.invoke(IPC.STORAGE_REVEAL_PATH, categoryOrPath)
+  },
+
+  copyStoragePath: (categoryOrPath: string): Promise<{ ok: boolean; path: string }> => {
+    return ipcRenderer.invoke(IPC.STORAGE_COPY_PATH, categoryOrPath)
   }
 })

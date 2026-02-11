@@ -4,6 +4,39 @@ export interface ActiveWindowInfo {
   url?: string
 }
 
+export type StorageCategory = 'history' | 'memory' | 'screenshots'
+
+export interface StorageCategoryUsage {
+  key: StorageCategory
+  label: string
+  bytes: number
+  path: string
+  itemCount?: number
+}
+
+export interface StorageUsageSummary {
+  usedBytes: number
+  maxBytes: number
+  percent: number
+  isOverLimit: boolean
+  categories: StorageCategoryUsage[]
+  prunableBytes: number
+}
+
+export interface StorageEnforceResult {
+  deletedRecords: number
+  reclaimedBytes: number
+  usedBytes: number
+  maxBytes: number
+  remainingOverageBytes: number
+  isOverLimit: boolean
+}
+
+export interface StorageLimitUpdateResult {
+  settings: AppSettings
+  usage: StorageUsageSummary
+}
+
 export interface ScreenCapture {
   displayId: string
   base64: string // JPEG base64
@@ -93,6 +126,7 @@ export interface AppSettings {
   apiKey: string
   apiModel: string
   apiTimeoutMs: number
+  maxStorageBytes: number
 }
 
 export type ChatRole = 'user' | 'assistant'

@@ -6,6 +6,13 @@ import { getSettings, saveSettings } from './settings'
 import { getHistory } from './database'
 import { listMemory, saveMemory } from './memory-database'
 import { apiTest, sendChat } from './chat-api'
+import {
+  copyStoragePath,
+  enforceStorageLimit,
+  getStorageUsage,
+  revealStoragePath,
+  setMaxStorageBytes
+} from './storage'
 
 interface IpcHandlerActions {
   triggerCapture: () => Promise<void>
@@ -68,6 +75,28 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
       return { ok: true, text }
     }
   )
+
+  ipcMain.handle(IPC.STORAGE_GET_USAGE, () => {
+    return getStorageUsage()
+  })
+
+  ipcMain.handle(IPC.STORAGE_SET_LIMIT, (_event, maxStorageBytes: number) => {
+    const settings = setMaxStorageBytes(maxStorageBytes)
+    const usage = getStorageUsage()
+    return { settings, usage }
+  })
+
+  ipcMain.handle(IPC.STORAGE_ENFORCE_LIMIT, () => {
+    return enforceStorageLimit()
+  })
+
+  ipcMain.handle(IPC.STORAGE_REVEAL_PATH, async (_event, categoryOrPath: string) => {
+    return revealStoragePath(categoryOrPath)
+  })
+
+  ipcMain.handle(IPC.STORAGE_COPY_PATH, (_event, categoryOrPath: string) => {
+    return copyStoragePath(categoryOrPath)
+  })
 
   console.log('[IPC] Handlers registered')
 }

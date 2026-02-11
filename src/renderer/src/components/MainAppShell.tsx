@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { AppSettings, ChatMessage, HistoryRecord, MemoryItem } from '@shared/types'
+import type {
+  AppSettings,
+  ChatMessage,
+  HistoryRecord,
+  MemoryItem,
+  StorageCategoryUsage,
+  StorageUsageSummary
+} from '@shared/types'
 import { cn } from '@/lib/utils'
 import {
   Bookmark,
@@ -8,7 +15,10 @@ import {
   Cog,
   Code2,
   Copy,
+  Database,
+  ExternalLink,
   Globe,
+  HardDrive,
   LayoutGrid,
   Loader2,
   Monitor,
@@ -30,14 +40,17 @@ const SIDEBAR_MIN_WIDTH_PX = 220
 const SIDEBAR_MAX_WIDTH_PX = 520
 const MAIN_MIN_WIDTH_PX = 420
 const SIDEBAR_RESIZER_WIDTH_PX = 14
+const MIN_STORAGE_MB = 50
+const MAX_STORAGE_MB = 5120
 
-type SettingsSection = 'general' | 'provider'
+type SettingsSection = 'general' | 'provider' | 'storage'
 
 const FALLBACK_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   apiModel: 'gpt-4o',
-  apiTimeoutMs: 30000
+  apiTimeoutMs: 30000,
+  maxStorageBytes: 512 * 1024 * 1024
 }
 
 function formatTime(ts: number): string {
@@ -194,6 +207,31 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let idx = 0
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024
+    idx += 1
+  }
+  return `${value >= 10 || idx === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[idx]}`
+}
+
+function bytesToMb(bytes: number): number {
+  return Math.max(0, Math.round(bytes / (1024 * 1024)))
+}
+
+function mbToBytes(mb: number): number {
+  return Math.round(mb * 1024 * 1024)
+}
+
+function clampStorageMb(value: number): number {
+  if (!Number.isFinite(value)) return MIN_STORAGE_MB
+  return clampNumber(Math.round(value), MIN_STORAGE_MB, MAX_STORAGE_MB)
+}
+
 export function MainAppShell() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const demoMode = urlParams.get('demo') === '1'
@@ -206,6 +244,13 @@ export function MainAppShell() {
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
   const [isTestingApi, setIsTestingApi] = useState(false)
+  const [storageUsage, setStorageUsage] = useState<StorageUsageSummary | null>(null)
+  const [isLoadingStorage, setIsLoadingStorage] = useState(false)
+  const [isSavingStorageLimit, setIsSavingStorageLimit] = useState(false)
+  const [isEnforcingStorageLimit, setIsEnforcingStorageLimit] = useState(false)
+  const [storageLimitMbInput, setStorageLimitMbInput] = useState<number>(() =>
+    bytesToMb(FALLBACK_SETTINGS.maxStorageBytes)
+  )
 
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
@@ -368,6 +413,7 @@ export function MainAppShell() {
         if (active) {
           setSettings(loaded)
           setLastSavedSettings(loaded)
+          setStorageLimitMbInput(bytesToMb(loaded.maxStorageBytes))
         }
       } catch {
         if (active) setStatusMessage('Failed to load settings')
@@ -412,9 +458,96 @@ export function MainAppShell() {
     }
   }
 
+  const refreshStorageUsage = async (showLoading = true): Promise<void> => {
+    if (showLoading) setIsLoadingStorage(true)
+    try {
+      const usage = await window.electronAPI.getStorageUsage()
+      setStorageUsage(usage)
+      setStorageLimitMbInput(bytesToMb(usage.maxBytes))
+    } catch {
+      setStatusMessage('Failed to load storage usage')
+    } finally {
+      if (showLoading) setIsLoadingStorage(false)
+    }
+  }
+
+  const saveStorageLimit = async (): Promise<void> => {
+    const nextMb = clampStorageMb(storageLimitMbInput)
+    setStorageLimitMbInput(nextMb)
+    setIsSavingStorageLimit(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.setStorageLimit(mbToBytes(nextMb))
+      setSettings(result.settings)
+      setLastSavedSettings(result.settings)
+      setStorageUsage(result.usage)
+      setStorageLimitMbInput(bytesToMb(result.settings.maxStorageBytes))
+      setStatusMessage(`Storage limit saved (${nextMb} MB)`)
+    } catch {
+      setStatusMessage('Failed to save storage limit')
+    } finally {
+      setIsSavingStorageLimit(false)
+    }
+  }
+
+  const runStorageCleanup = async (): Promise<void> => {
+    setIsEnforcingStorageLimit(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.enforceStorageLimit()
+      await refreshStorageUsage(false)
+      if (result.reclaimedBytes > 0 || result.deletedRecords > 0) {
+        setStatusMessage(
+          `Cleanup reclaimed ${formatBytes(result.reclaimedBytes)} (${result.deletedRecords} capture${result.deletedRecords === 1 ? '' : 's'} removed)`
+        )
+      } else if (result.isOverLimit) {
+        setStatusMessage(
+          `Still over limit by ${formatBytes(result.remainingOverageBytes)}. Increase limit or manually clean screenshots.`
+        )
+      } else {
+        setStatusMessage('Storage is already within limit')
+      }
+    } catch {
+      setStatusMessage('Failed to run storage cleanup')
+    } finally {
+      setIsEnforcingStorageLimit(false)
+    }
+  }
+
+  const revealStoragePath = async (categoryOrPath: string): Promise<void> => {
+    try {
+      const result = await window.electronAPI.revealStoragePath(categoryOrPath)
+      setStatusMessage(result.ok ? `Opened: ${result.path}` : 'Failed to reveal path')
+    } catch {
+      setStatusMessage('Failed to reveal path')
+    }
+  }
+
+  const copyStoragePath = async (categoryOrPath: string): Promise<void> => {
+    try {
+      const result = await window.electronAPI.copyStoragePath(categoryOrPath)
+      setStatusMessage(result.ok ? `Path copied: ${result.path}` : 'Failed to copy path')
+    } catch {
+      setStatusMessage('Failed to copy path')
+    }
+  }
+
   useEffect(() => {
     void refreshMemory()
   }, [])
+
+  useEffect(() => {
+    if (route !== 'settings' || settingsSection !== 'storage') return
+    void refreshStorageUsage()
+
+    const timer = window.setInterval(() => {
+      void refreshStorageUsage(false)
+    }, 8000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [route, settingsSection])
 
   useEffect(() => {
     void (async () => {
@@ -494,17 +627,20 @@ export function MainAppShell() {
       settings.apiBaseUrl !== lastSavedSettings.apiBaseUrl ||
       settings.apiKey !== lastSavedSettings.apiKey ||
       settings.apiModel !== lastSavedSettings.apiModel ||
-      settings.apiTimeoutMs !== lastSavedSettings.apiTimeoutMs
+      settings.apiTimeoutMs !== lastSavedSettings.apiTimeoutMs ||
+      settings.maxStorageBytes !== lastSavedSettings.maxStorageBytes
     )
   }, [
     lastSavedSettings.apiBaseUrl,
     lastSavedSettings.apiKey,
     lastSavedSettings.apiModel,
     lastSavedSettings.apiTimeoutMs,
+    lastSavedSettings.maxStorageBytes,
     settings.apiBaseUrl,
     settings.apiKey,
     settings.apiModel,
-    settings.apiTimeoutMs
+    settings.apiTimeoutMs,
+    settings.maxStorageBytes
   ])
 
   const activeRecord: HistoryRecord | null = useMemo(() => {
@@ -632,6 +768,19 @@ export function MainAppShell() {
     }
     return groups
   }, [displayHistory])
+
+  const storagePercent = storageUsage ? Math.max(0, storageUsage.percent) : 0
+  const storageProgressPercent = Math.min(100, storagePercent)
+  const storageTone =
+    storagePercent > 100 ? 'danger' : storagePercent >= 80 ? 'warning' : 'normal'
+  const storageProgressClass =
+    storageTone === 'danger'
+      ? 'bg-rose-500'
+      : storageTone === 'warning'
+        ? 'bg-amber-500'
+        : 'bg-[#6e8f95]'
+
+  const storageCategories: StorageCategoryUsage[] = storageUsage?.categories ?? []
 
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
@@ -844,6 +993,18 @@ export function MainAppShell() {
                 >
                   <SettingsIcon className="h-4 w-4 text-slate-500" />
                   <span className="flex-1 text-left">Providers</span>
+                </button>
+                <button
+                  className={cn(
+                    'app-nodrag w-full flex items-center gap-3 px-3 py-2 rounded-2xl border transition text-sm',
+                    settingsSection === 'storage'
+                      ? 'bg-white/80 border-slate-200/70 shadow-sm text-slate-800'
+                      : 'bg-white/0 border-transparent text-slate-600 hover:bg-white/60 hover:border-slate-200/60'
+                  )}
+                  onClick={() => setSettingsSection('storage')}
+                >
+                  <HardDrive className="h-4 w-4 text-slate-500" />
+                  <span className="flex-1 text-left">Storage</span>
                 </button>
               </div>
             </div>
@@ -1092,12 +1253,14 @@ export function MainAppShell() {
                 <div>
                   <div className="text-xs text-slate-400">Settings</div>
                   <div className="text-2xl font-semibold tracking-tight text-slate-800 mt-1">
-                    {settingsSection === 'general' ? 'General' : 'Providers'}
+                    {settingsSection === 'general' ? 'General' : settingsSection === 'provider' ? 'Providers' : 'Storage'}
                   </div>
                   <div className="text-sm text-slate-500 mt-1">
                     {settingsSection === 'general'
                       ? 'Model and request behavior used by Detector.'
-                      : 'OpenAI-compatible endpoint and API credentials.'}
+                      : settingsSection === 'provider'
+                        ? 'OpenAI-compatible endpoint and API credentials.'
+                        : 'Manage local Detector data usage.'}
                   </div>
                 </div>
                 <button
@@ -1190,6 +1353,197 @@ export function MainAppShell() {
                         </div>
                       </div>
                     )}
+
+                    {settingsSection === 'storage' && (
+                      <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6 space-y-6">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                              <Database className="h-5 w-5 text-slate-500" />
+                              Storage
+                            </div>
+                            <div className="text-sm text-slate-500 mt-1">
+                              Track local database size and set an auto-cleanup limit for capture data.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => void refreshStorageUsage()}
+                            disabled={isLoadingStorage}
+                            className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                          >
+                            {isLoadingStorage ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Refreshing
+                              </>
+                            ) : (
+                              <>
+                                <HardDrive className="h-3.5 w-3.5" />
+                                Refresh
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {isLoadingStorage && !storageUsage ? (
+                          <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 px-4 py-5 text-sm text-slate-500 flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading storage usage...
+                          </div>
+                        ) : (
+                          <>
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-4 space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm text-slate-600">
+                                  <span className="font-semibold text-slate-800">
+                                    {formatBytes(storageUsage?.usedBytes ?? 0)}
+                                  </span>{' '}
+                                  / {formatBytes(storageUsage?.maxBytes ?? settings.maxStorageBytes)}
+                                </div>
+                                <div
+                                  className={cn(
+                                    'text-xs font-semibold tabular-nums',
+                                    storageTone === 'danger'
+                                      ? 'text-rose-600'
+                                      : storageTone === 'warning'
+                                        ? 'text-amber-600'
+                                        : 'text-slate-500'
+                                  )}
+                                >
+                                  {storagePercent.toFixed(1)}%
+                                </div>
+                              </div>
+                              <div className="h-2.5 w-full rounded-full bg-slate-200/80 overflow-hidden">
+                                <div
+                                  className={cn('h-full rounded-full transition-[width] duration-200', storageProgressClass)}
+                                  style={{ width: `${storageProgressPercent}%` }}
+                                />
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                Auto-prunable: {formatBytes(storageUsage?.prunableBytes ?? 0)}
+                              </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-4">
+                              <div className="text-sm font-semibold text-slate-800">Max storage limit</div>
+                              <div className="text-xs text-slate-500 mt-1">
+                                Limit applies to all local data. Detector auto-cleans oldest captures when above this
+                                limit.
+                              </div>
+                              <div className="mt-4 space-y-3">
+                                <input
+                                  type="range"
+                                  min={MIN_STORAGE_MB}
+                                  max={MAX_STORAGE_MB}
+                                  step={50}
+                                  value={clampStorageMb(storageLimitMbInput)}
+                                  onChange={(e) => setStorageLimitMbInput(clampStorageMb(Number(e.target.value)))}
+                                  className="app-nodrag w-full accent-[#6e8f95]"
+                                />
+                                <div className="flex items-center gap-3">
+                                  <div className="relative w-40">
+                                    <input
+                                      type="number"
+                                      min={MIN_STORAGE_MB}
+                                      max={MAX_STORAGE_MB}
+                                      step={50}
+                                      value={storageLimitMbInput}
+                                      onChange={(e) =>
+                                        setStorageLimitMbInput(clampStorageMb(Number(e.target.value || MIN_STORAGE_MB)))
+                                      }
+                                      className="app-nodrag w-full rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 pr-11 text-sm outline-none focus:ring-2 focus:ring-[#6e8f95]/30"
+                                    />
+                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                                      MB
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => void saveStorageLimit()}
+                                    disabled={isSavingStorageLimit || isLoadingStorage}
+                                    className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-3.5 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                  >
+                                    {isSavingStorageLimit ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Saving...
+                                      </>
+                                    ) : (
+                                      'Save limit'
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {storageUsage && storageUsage.isOverLimit && (
+                              <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 flex items-center justify-between gap-3">
+                                <div className="text-sm text-rose-700">
+                                  Storage is above limit by{' '}
+                                  <span className="font-semibold">
+                                    {formatBytes(storageUsage.usedBytes - storageUsage.maxBytes)}
+                                  </span>
+                                  . Run cleanup to remove oldest captures.
+                                </div>
+                                <button
+                                  onClick={() => void runStorageCleanup()}
+                                  disabled={isEnforcingStorageLimit}
+                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-rose-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                >
+                                  {isEnforcingStorageLimit ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      Cleaning...
+                                    </>
+                                  ) : (
+                                    'Run cleanup now'
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/80 overflow-hidden">
+                              <div className="px-4 py-3 border-b border-slate-200/60 bg-slate-50/70 text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                Storage breakdown
+                              </div>
+                              <div className="divide-y divide-slate-200/60">
+                                {storageCategories.map((category) => (
+                                  <div key={category.key} className="px-4 py-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-slate-800">{category.label}</div>
+                                        <div className="mt-1 text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+                                          <span>{formatBytes(category.bytes)}</span>
+                                          {typeof category.itemCount === 'number' && (
+                                            <span className="tabular-nums">{category.itemCount} items</span>
+                                          )}
+                                        </div>
+                                        <div className="mt-1 text-[11px] text-slate-400 break-all">{category.path}</div>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-2">
+                                        <button
+                                          onClick={() => void revealStoragePath(category.key)}
+                                          className="app-nodrag inline-flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                                        >
+                                          <ExternalLink className="h-3.5 w-3.5" />
+                                          Reveal
+                                        </button>
+                                        <button
+                                          onClick={() => void copyStoragePath(category.key)}
+                                          className="app-nodrag inline-flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                                        >
+                                          <Copy className="h-3.5 w-3.5" />
+                                          Copy path
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1198,11 +1552,13 @@ export function MainAppShell() {
                 <div className="text-sm text-slate-500 truncate">
                   {statusMessage
                     ? statusMessage
-                    : isSavingSettings
-                      ? 'Saving...'
-                      : isDirty
-                        ? 'Unsaved changes'
-                        : 'All changes saved'}
+                    : settingsSection === 'storage'
+                      ? 'Storage usage refreshes automatically while this tab is open'
+                      : isSavingSettings
+                        ? 'Saving...'
+                        : isDirty
+                          ? 'Unsaved changes'
+                          : 'All changes saved'}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1212,40 +1568,44 @@ export function MainAppShell() {
                   >
                     Close
                   </button>
-                  <button
-                    onClick={testApi}
-                    disabled={isTestingApi || isLoadingSettings}
-                    className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                  >
-                    {isTestingApi ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Testing...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        Test API
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={saveSettings}
-                    disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
-                    className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-4 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
-                  >
-                    {isSavingSettings ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <SettingsIcon className="h-4 w-4" />
-                        Save
-                      </>
-                    )}
-                  </button>
+                  {settingsSection !== 'storage' && (
+                    <>
+                      <button
+                        onClick={testApi}
+                        disabled={isTestingApi || isLoadingSettings}
+                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                      >
+                        {isTestingApi ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Testing...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            Test API
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={saveSettings}
+                        disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
+                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[#6e8f95] px-4 py-2 text-sm font-medium text-white hover:bg-[#628389] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                      >
+                        {isSavingSettings ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <SettingsIcon className="h-4 w-4" />
+                            Save
+                          </>
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

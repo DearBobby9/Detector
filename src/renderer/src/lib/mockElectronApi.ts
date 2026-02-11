@@ -1,5 +1,15 @@
 import type { ElectronAPI } from './types'
-import type { AppSettings, ChatMessage, DetectionResult, HistoryRecord, MemoryItem } from '@shared/types'
+import type {
+  AppSettings,
+  ChatMessage,
+  DetectionResult,
+  HistoryRecord,
+  MemoryItem,
+  StorageCategoryUsage,
+  StorageEnforceResult,
+  StorageLimitUpdateResult,
+  StorageUsageSummary
+} from '@shared/types'
 
 const MOCK_SETTINGS_STORAGE_KEY = 'detector.mockSettings'
 const MOCK_MEMORY_STORAGE_KEY = 'detector.mockMemory'
@@ -8,7 +18,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   apiModel: 'gpt-4o',
-  apiTimeoutMs: 30000
+  apiTimeoutMs: 30000,
+  maxStorageBytes: 512 * 1024 * 1024
 }
 
 function sleep(ms: number): Promise<void> {
@@ -197,6 +208,47 @@ export function createMockElectronAPI(): ElectronAPI {
   let nextHistoryId = (history[history.length - 1]?.id ?? 0) + 1
   let memory = loadMemory()
   let nextMemoryId = (memory[memory.length - 1]?.id ?? 0) + 1
+  const mockUserDataRoot = '/Users/you/Library/Application Support/detector'
+  const mockScreenshotsBytes = 0
+
+  const getMockStorageUsage = (): StorageUsageSummary => {
+    const historyBytes = new Blob([JSON.stringify(history)]).size
+    const memoryBytes = new Blob([JSON.stringify(memory)]).size
+    const categories: StorageCategoryUsage[] = [
+      {
+        key: 'history',
+        label: 'Capture history',
+        bytes: historyBytes,
+        path: `${mockUserDataRoot}/history.json`,
+        itemCount: history.length
+      },
+      {
+        key: 'memory',
+        label: 'Saved memory',
+        bytes: memoryBytes,
+        path: `${mockUserDataRoot}/memory.json`,
+        itemCount: memory.length
+      },
+      {
+        key: 'screenshots',
+        label: 'Screenshots',
+        bytes: mockScreenshotsBytes,
+        path: `${mockUserDataRoot}/captures`,
+        itemCount: 0
+      }
+    ]
+    const usedBytes = categories.reduce((sum, c) => sum + c.bytes, 0)
+    const maxBytes = settings.maxStorageBytes
+    const percent = maxBytes > 0 ? (usedBytes / maxBytes) * 100 : 0
+    return {
+      usedBytes,
+      maxBytes,
+      percent,
+      isOverLimit: usedBytes > maxBytes,
+      categories,
+      prunableBytes: historyBytes + mockScreenshotsBytes
+    }
+  }
 
   return {
     onShowLoading: (callback) => {
@@ -332,6 +384,61 @@ export function createMockElectronAPI(): ElectronAPI {
       const last = payload.messages[payload.messages.length - 1]?.content ?? ''
       await sleep(280)
       return { ok: true, text: `Mock reply (browser preview): ${last.slice(0, 80)}` }
+    },
+    getStorageUsage: async (): Promise<StorageUsageSummary> => {
+      return getMockStorageUsage()
+    },
+    setStorageLimit: async (maxStorageBytes: number): Promise<StorageLimitUpdateResult> => {
+      const clamped = Math.min(5 * 1024 * 1024 * 1024, Math.max(50 * 1024 * 1024, Math.floor(maxStorageBytes)))
+      settings = { ...settings, maxStorageBytes: clamped }
+      saveSettings(settings)
+      return { settings, usage: getMockStorageUsage() }
+    },
+    enforceStorageLimit: async (): Promise<StorageEnforceResult> => {
+      const before = getMockStorageUsage()
+      let deletedRecords = 0
+
+      while (history.length > 0 && getMockStorageUsage().usedBytes > settings.maxStorageBytes) {
+        history.shift()
+        deletedRecords += 1
+      }
+
+      const after = getMockStorageUsage()
+      return {
+        deletedRecords,
+        reclaimedBytes: Math.max(0, before.usedBytes - after.usedBytes),
+        usedBytes: after.usedBytes,
+        maxBytes: after.maxBytes,
+        remainingOverageBytes: Math.max(0, after.usedBytes - after.maxBytes),
+        isOverLimit: after.isOverLimit
+      }
+    },
+    revealStoragePath: async (categoryOrPath: string): Promise<{ ok: boolean; path: string }> => {
+      const path =
+        categoryOrPath === 'history'
+          ? `${mockUserDataRoot}/history.json`
+          : categoryOrPath === 'memory'
+            ? `${mockUserDataRoot}/memory.json`
+            : categoryOrPath === 'screenshots'
+              ? `${mockUserDataRoot}/captures`
+              : String(categoryOrPath || '').trim()
+      return { ok: true, path }
+    },
+    copyStoragePath: async (categoryOrPath: string): Promise<{ ok: boolean; path: string }> => {
+      const resolved =
+        categoryOrPath === 'history'
+          ? `${mockUserDataRoot}/history.json`
+          : categoryOrPath === 'memory'
+            ? `${mockUserDataRoot}/memory.json`
+            : categoryOrPath === 'screenshots'
+              ? `${mockUserDataRoot}/captures`
+              : String(categoryOrPath || '').trim()
+      try {
+        await navigator.clipboard.writeText(resolved)
+      } catch {
+        // ignore
+      }
+      return { ok: true, path: resolved }
     }
   }
 }

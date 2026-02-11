@@ -12,5 +12,10 @@ export const IPC = {
   HISTORY_LIST: 'history:list',
   MEMORY_LIST: 'memory:list',
   MEMORY_SAVE: 'memory:save',
-  CHAT_SEND: 'chat:send'
+  CHAT_SEND: 'chat:send',
+  STORAGE_GET_USAGE: 'storage:get-usage',
+  STORAGE_SET_LIMIT: 'storage:set-limit',
+  STORAGE_ENFORCE_LIMIT: 'storage:enforce-limit',
+  STORAGE_REVEAL_PATH: 'storage:reveal-path',
+  STORAGE_COPY_PATH: 'storage:copy-path'
 } as const

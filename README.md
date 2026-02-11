@@ -51,6 +51,8 @@ API_KEY=your-api-key
 API_MODEL=gpt-4o
 # optional (default 30000)
 # API_TIMEOUT_MS=30000
+# optional (default 536870912 = 512MB)
+# MAX_STORAGE_BYTES=536870912
 ```
 
 Important:
@@ -68,6 +70,28 @@ Files:
 
 - `history.json` - last 100 captures (raw model JSON + a text summary for chat context)
 - `memory.json` - saved memory items you confirmed from the capture panel
+- `captures/` - screenshot storage root (reserved path; currently may be empty)
+
+## Storage Management
+
+`Settings -> Storage` now reads **real local disk usage** from the app data directory and shows:
+
+- total used bytes vs max limit (progress bar)
+- category breakdown:
+  - capture history (`history.json`)
+  - saved memory (`memory.json`)
+  - screenshots directory (`captures/`)
+- item counts and absolute local paths
+- actions per category:
+  - `Reveal` (open in Finder)
+  - `Copy path`
+
+Storage policy:
+
+- limit applies to all categories
+- when over limit, Detector auto-prunes **oldest captures/history first**
+- Detector never auto-deletes saved memory items
+- manual cleanup can be triggered from the Storage tab
 
 ## Development
 
