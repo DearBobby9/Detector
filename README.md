@@ -11,7 +11,7 @@ It sends screenshots to an OpenAI-compatible API and shows either:
 
 - a conservative email reply draft (only when an email UI is clearly detected), and
 - a short list of actionable **memory candidates** (todos, reminders, deliveries, reading list, etc.) that you can save.
-- real active-window metadata (active app, window title, active URL), and when the front app is a supported browser, the full tab list (title + URL) from open browser windows.
+- real active-window metadata (active app, window title, active URL), and for supported visible browsers on the current desktop, grouped browser sessions with full tab list (title + URL).
 
 The main window also provides a simple chat UI:
 
@@ -138,6 +138,20 @@ npm run rebuild:mac
 # npm run rebuild:mac -- --tail
 ```
 
+What this command now does automatically:
+
+- Quit old Detector process
+- Build + package app
+- Install to a stable path (prefer `/Applications/Detector.app`, fallback `~/Applications/Detector.app`)
+- Clear local quarantine/provenance attributes (best effort)
+- Launch installed app and write logs to `logs/`
+
+Open installed app directly (without rebuilding):
+
+```bash
+npm run open:mac
+```
+
 Manual (build + package):
 
 ```bash
@@ -155,6 +169,8 @@ Output app:
 ## Permissions (macOS)
 
 The app needs Screen Recording permission for screenshot capture.
+
+Browser metadata collection relies on macOS automation permissions. If automation is denied or times out, capture still succeeds with partial metadata.
 
 - Development mode: grant permission to `Electron`
 - Packaged mode: grant permission to `detector.app`
@@ -210,22 +226,38 @@ Note:
 - Chat:
   - Screen context section is expanded by default
   - Context uses **raw metadata first** (active app/window/url/tabs), then falls back to model output text when needed
-  - Browser metadata is sourced from macOS automation in main process (`active-window.ts`) and includes all collected tabs for supported browsers (Safari, Chrome, Arc, Brave, Edge)
+  - Browser metadata is sourced from macOS automation in main process (`active-window.ts`) and includes grouped sessions for visible supported browsers (Safari, Chrome, Arc, Brave, Edge) with full tabs
 - Memory:
   - Saved items you confirmed from the capture panel
 - Settings:
-  - `API Base URL`
-  - `API Key`
-  - `Model`
-  - `Timeout (ms)`
-  - `Test API`
-  - Save settings to local app data (`~/Library/Application Support/.../settings.json`)
+  - 4 sections (Dayflow-aligned IA): `General` / `Providers` / `Storage` / `Other`
+  - `General`:
+    - Recording status card: `Screen recording permission`, `Automation permission`, `Capture service`, `Run status check`
+    - Screen recording quick actions when not granted: `Request access` and `Open System Settings`
+  - `Providers` (single-provider mode):
+    - Provider overview (endpoint/model/key/health)
+    - Connection health check (`Run health check`) with last checked timestamp
+    - API test is strict: validates both basic ping (`OK`) and capture JSON-schema response compatibility
+    - Edit config: `API Base URL`, `Model`, `Timeout (ms)`, `API Key`
+    - Prompt customization: `capturePromptTemplate`, `chatPromptTemplate`, `Reset defaults`
+    - Failover shown as `Planned` (no interactive routing controls yet)
+  - `Storage`:
+    - Disk usage + global storage cap + cleanup + per-category `Reveal` / `Copy path`
+  - `Other`:
+    - Runtime preferences: `Launch at login`, `Show Dock icon`
+    - Privacy/preferences toggles: `Share crash reports` (Planned), `Share anonymous usage` (Planned), `Show timeline icons` (Not enabled)
+    - `Output language override`
+    - `Export timeline` (Markdown, date range)
+    - `Debug reprocess day` (development builds only)
+  - Settings persist to local app data (`~/Library/Application Support/.../settings.json`)
 
 ## Troubleshooting
 
 - `API error: 404`: usually `API_BASE_URL` path mismatch. Check whether `/v1` is required.
+- `Model response was not valid JSON`: usually means the selected model returned plain text (for example model deprecation/error message) instead of Detector's required capture JSON schema.
 - `Screen Recording permission is denied`: enable permission in System Settings, then relaunch app.
 - No popup on full-screen app: ensure you are testing the latest packaged build.
+- If you previously had both `~/Library/Application Support/Detector` and `~/Library/Application Support/detector`, Detector now migrates/syncs settings to avoid split configuration confusion.
 
 ## UI Notes (Panel)
 
@@ -234,6 +266,16 @@ The capture panel (top overlay) has two modes:
 - Collapsed: slim loading bar (`Analyzing your screen...`)
 - Expanded: full result view (email draft + memory candidates)
 - Memory candidate cards are clickable; clicking opens a detail modal with full, untruncated content.
+
+## Panel Persistence
+
+- The floating panel no longer auto-hides on app/page switch or focus loss.
+- The panel stays on screen until you explicitly close it with:
+  - `Esc`
+  - the top-right `X` in the panel header
+- Hover-out no longer collapses or hides the panel.
+- Pressing `Cmd+Shift+.` while the panel is already visible starts a new capture and refreshes the same panel.
+- Copy actions keep the panel open (copy no longer dismisses the window).
 
 ## UI Notes (Main Window)
 

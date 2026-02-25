@@ -8,6 +8,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "rebuild:mac": "bash scripts/rebuild-mac.sh",
+    "open:mac": "open -n /Applications/Detector.app || open -n $HOME/Applications/Detector.app",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
