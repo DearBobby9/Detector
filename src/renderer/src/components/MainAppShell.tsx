@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { AnimatePresence, motion } from 'framer-motion'
 import type {
   AppSettings,
+  ChatProvider,
   BrowserSessionInfo,
   BrowserTabInfo,
   ChatMessage,
@@ -61,6 +62,10 @@ const FALLBACK_SETTINGS: AppSettings = {
   apiKey: '',
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
+  chatProvider: 'api',
+  codexCliPath: 'codex',
+  codexCliModel: '',
+  codexCliTimeoutMs: 120000,
   maxStorageBytes: 512 * 1024 * 1024,
   themeMode: 'light',
   launchAtLogin: false,
@@ -84,6 +89,11 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; label: string; hint: string 
   { value: 'light', label: 'Day', hint: 'Parchment surface with taupe text' },
   { value: 'dark', label: 'Night', hint: 'Taupe canvas with warm neutral contrast' },
   { value: 'system', label: 'System', hint: 'Follow macOS appearance' }
+]
+
+const CHAT_PROVIDER_OPTIONS: Array<{ value: ChatProvider; label: string; hint: string }> = [
+  { value: 'api', label: 'API', hint: 'OpenAI-compatible endpoint via API key' },
+  { value: 'codex-cli', label: 'Codex CLI', hint: 'Local codex command in your shell environment' }
 ]
 
 function formatTime(ts: number): string {
@@ -341,7 +351,9 @@ export function MainAppShell() {
 
   const [isSidebarSearchOpen, setIsSidebarSearchOpen] = useState(false)
   const [sidebarQuery, setSidebarQuery] = useState('')
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false)
   const sidebarSearchRef = useRef<HTMLInputElement | null>(null)
+  const moreMenuRef = useRef<HTMLDivElement | null>(null)
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null)
   const [showSidebarTopFade, setShowSidebarTopFade] = useState(false)
   const [showSidebarBottomFade, setShowSidebarBottomFade] = useState(false)
@@ -438,6 +450,28 @@ export function MainAppShell() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  useEffect(() => {
+    if (!isMoreMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (moreMenuRef.current?.contains(target)) return
+      setIsMoreMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMoreMenuOpen(false)
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isMoreMenuOpen])
 
   const stopResizingSidebar = () => {
     sidebarResizeCleanupRef.current?.()
@@ -837,6 +871,10 @@ export function MainAppShell() {
   }, [isSidebarSearchOpen])
 
   useEffect(() => {
+    setIsMoreMenuOpen(false)
+  }, [route])
+
+  useEffect(() => {
     const el = sidebarScrollRef.current
     if (!el) return
 
@@ -879,8 +917,11 @@ export function MainAppShell() {
   }, [route, settingsSection, isLoadingSettings, isLoadingStorage, storageUsage])
 
   const canSave = useMemo(() => {
+    if (settings.chatProvider === 'codex-cli') {
+      return settings.codexCliPath.trim().length > 0
+    }
     return settings.apiBaseUrl.trim().length > 0 && settings.apiModel.trim().length > 0
-  }, [settings.apiBaseUrl, settings.apiModel])
+  }, [settings.apiBaseUrl, settings.apiModel, settings.chatProvider, settings.codexCliPath])
 
   const isDirty = useMemo(() => {
     return (
@@ -888,6 +929,10 @@ export function MainAppShell() {
       settings.apiKey !== lastSavedSettings.apiKey ||
       settings.apiModel !== lastSavedSettings.apiModel ||
       settings.apiTimeoutMs !== lastSavedSettings.apiTimeoutMs ||
+      settings.chatProvider !== lastSavedSettings.chatProvider ||
+      settings.codexCliPath !== lastSavedSettings.codexCliPath ||
+      settings.codexCliModel !== lastSavedSettings.codexCliModel ||
+      settings.codexCliTimeoutMs !== lastSavedSettings.codexCliTimeoutMs ||
       settings.maxStorageBytes !== lastSavedSettings.maxStorageBytes ||
       settings.themeMode !== lastSavedSettings.themeMode ||
       settings.launchAtLogin !== lastSavedSettings.launchAtLogin ||
@@ -904,6 +949,10 @@ export function MainAppShell() {
     lastSavedSettings.apiKey,
     lastSavedSettings.apiModel,
     lastSavedSettings.apiTimeoutMs,
+    lastSavedSettings.chatProvider,
+    lastSavedSettings.codexCliPath,
+    lastSavedSettings.codexCliModel,
+    lastSavedSettings.codexCliTimeoutMs,
     lastSavedSettings.maxStorageBytes,
     lastSavedSettings.themeMode,
     lastSavedSettings.launchAtLogin,
@@ -918,6 +967,10 @@ export function MainAppShell() {
     settings.apiKey,
     settings.apiModel,
     settings.apiTimeoutMs,
+    settings.chatProvider,
+    settings.codexCliPath,
+    settings.codexCliModel,
+    settings.codexCliTimeoutMs,
     settings.maxStorageBytes,
     settings.themeMode,
     settings.launchAtLogin,
@@ -1322,7 +1375,10 @@ export function MainAppShell() {
     runtimeScreenPermission === 'not-determined' || runtimeScreenPermission === 'unknown'
   const screenPermissionNeedsSettings =
     runtimeScreenPermission === 'denied' || runtimeScreenPermission === 'restricted'
+  const isApiProvider = settings.chatProvider === 'api'
+  const providerDisplayName = isApiProvider ? 'API' : 'Codex CLI'
   const providerKeyConfigured = settings.apiKey.trim().length > 0
+  const codexPathConfigured = settings.codexCliPath.trim().length > 0
   const providerBaseHost = (() => {
     try {
       const url = new URL(settings.apiBaseUrl)
@@ -1331,6 +1387,12 @@ export function MainAppShell() {
       return settings.apiBaseUrl || '—'
     }
   })()
+  const isChatProviderReady = isApiProvider ? providerKeyConfigured : codexPathConfigured
+  const chatInputPlaceholder = isChatProviderReady
+    ? 'Type a message…'
+    : isApiProvider
+      ? 'Set API key in Settings first…'
+      : 'Set Codex CLI command in Settings first…'
 
   const permissionToneClass = (permission: SettingsRuntimeStatus['screenPermission']) => {
     if (permission === 'granted') return 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
@@ -1379,12 +1441,16 @@ export function MainAppShell() {
       const res = await window.electronAPI.apiTest(settings)
       setProviderHealth(res)
       setProviderLastCheckedAt(Date.now())
-      setStatusMessage(res.ok ? `API test ok (${res.latencyMs}ms)` : `API test failed: ${res.message} (${res.latencyMs}ms)`)
+      setStatusMessage(
+        res.ok
+          ? `${providerDisplayName} test ok (${res.latencyMs}ms)`
+          : `${providerDisplayName} test failed: ${res.message} (${res.latencyMs}ms)`
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setProviderHealth({ ok: false, message, latencyMs: 0 })
       setProviderLastCheckedAt(Date.now())
-      setStatusMessage(`API test failed: ${message}`)
+      setStatusMessage(`${providerDisplayName} test failed: ${message}`)
     } finally {
       setIsTestingApi(false)
     }
@@ -1470,44 +1536,50 @@ export function MainAppShell() {
       style={{ gridTemplateColumns: `${sidebarWidth}px ${SIDEBAR_RESIZER_WIDTH_PX}px 1fr`, gridTemplateRows: '1fr' }}
     >
       <aside className="app-sidebar flex flex-col relative min-w-0 min-h-0 overflow-hidden">
-        <div className="h-12 flex items-center gap-2 px-3 pl-16 app-drag">
-          <button
-            className="app-nodrag h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-200/50 flex items-center justify-center transition"
-            onClick={showHome}
-            aria-label="Home"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </button>
-          <button
-            className="app-nodrag h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-200/50 flex items-center justify-center transition"
-            onClick={() => {
-              if (route === 'settings') {
-                setStatusMessage('Search in settings is not available yet')
-                return
-              }
-              setIsSidebarSearchOpen((v) => !v)
-            }}
-            aria-label="Search"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-          <button
-            className="app-nodrag h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-200/50 flex items-center justify-center transition"
-            onClick={startNewChat}
-            aria-label="New chat"
-          >
-            <PenSquare className="h-4 w-4" />
-          </button>
-          <div className="flex-1" />
-          <button
-            className="app-nodrag h-8 w-8 rounded-lg text-slate-500 hover:bg-slate-200/50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition"
-            onClick={() => void triggerCapture()}
-            disabled={isCapturing}
-            aria-label="Capture"
-            title="Capture (Cmd+Shift+.)"
-          >
-            {isCapturing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          </button>
+        <div className="h-14 px-3 pl-16 pt-2 pb-1 app-drag">
+          <div className="h-full rounded-xl border border-slate-200/70 bg-white/80 backdrop-blur-sm shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-1.5 flex items-center justify-between gap-2">
+            <div className="app-nodrag flex items-center gap-0.5">
+              <button
+                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
+                onClick={showHome}
+                aria-label="Home"
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
+                onClick={() => {
+                  if (route === 'settings') {
+                    setStatusMessage('Search in settings is not available yet')
+                    return
+                  }
+                  setIsSidebarSearchOpen((v) => !v)
+                }}
+                aria-label="Search"
+              >
+                <Search className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
+                onClick={startNewChat}
+                aria-label="New chat"
+              >
+                <PenSquare className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="h-5 w-px bg-slate-200/80" />
+
+            <button
+              className="app-nodrag h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition"
+              onClick={() => void triggerCapture()}
+              disabled={isCapturing}
+              aria-label="Capture"
+              title="Capture (Cmd+Shift+.)"
+            >
+              {isCapturing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
 
         {route !== 'settings' && isSidebarSearchOpen && (
@@ -1626,7 +1698,9 @@ export function MainAppShell() {
                                   className={cn(
                                     'app-nodrag w-full text-left rounded-lg px-2 py-1.5 transition relative',
                                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]',
-                                    isActive ? 'bg-white/90' : 'bg-transparent hover:bg-white/70'
+                                    isActive
+                                      ? 'bg-white/90 ring-1 ring-slate-200/80 shadow-[0_6px_14px_rgba(15,23,42,0.08),0_1px_2px_rgba(15,23,42,0.06)]'
+                                      : 'bg-transparent hover:bg-white/70 hover:shadow-sm'
                                   )}
                                 >
                                   <div className="flex items-baseline justify-between gap-3">
@@ -1637,9 +1711,6 @@ export function MainAppShell() {
                                       {formatCompactTime(record.timestamp)}
                                     </div>
                                   </div>
-                                  {isActive && (
-                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-[var(--ui-accent)]" />
-                                  )}
                                 </button>
                               )
                             })}
@@ -1671,76 +1742,119 @@ export function MainAppShell() {
 
         {route !== 'settings' && (
           <div className="px-3 pb-3 shrink-0 app-nodrag">
-            <div className="relative w-full group">
-              <div
-                className={cn(
-                  'absolute left-0 right-0 bottom-9 z-50 pb-2 origin-bottom-left will-change-transform',
-                  'transition duration-200 ease-out motion-reduce:transition-none',
-                  'opacity-0 scale-[0.98] translate-y-2 pointer-events-none',
-                  'group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
+            <div ref={moreMenuRef} className="relative w-full">
+              <AnimatePresence>
+                {isMoreMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.985 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.985 }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
+                    className="absolute left-1 right-1 bottom-11 z-50 w-auto rounded-xl border border-slate-200/85 bg-white/98 backdrop-blur-md shadow-[0_12px_24px_rgba(15,23,42,0.10),0_2px_6px_rgba(15,23,42,0.06)] overflow-hidden"
+                  >
+                    <div className="px-3 pt-2 pb-1 text-[9px] font-semibold tracking-[0.12em] text-slate-400 uppercase">
+                      Workspace
+                    </div>
+                    <div className="px-2 pb-2 space-y-0.5">
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          setStatusMessage('Manage Prompt Apps not implemented yet')
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <SlidersHorizontal className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">Manage Prompt Apps</span>
+                      </button>
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          openMemory()
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <Bookmark className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">Memory</span>
+                      </button>
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          setStatusMessage('Live Coding not implemented yet')
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <Code2 className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">Live Coding</span>
+                      </button>
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          openSettings('general')
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <SettingsIcon className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">Settings</span>
+                      </button>
+                    </div>
+
+                    <div className="mx-3 h-px bg-slate-200/80" />
+
+                    <div className="px-3 pt-2 pb-1 text-[9px] font-semibold tracking-[0.12em] text-slate-400 uppercase">
+                      Sidebar
+                    </div>
+                    <div className="px-2 pb-2 space-y-0.5">
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          setSidebarWidth(
+                            clampNumber(SIDEBAR_DEFAULT_WIDTH_PX, SIDEBAR_MIN_WIDTH_PX, getMaxSidebarWidth())
+                          )
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <LayoutGrid className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">Reset width</span>
+                      </button>
+                      <button
+                        className="app-nodrag group/item w-full h-8 flex items-center gap-2 px-2.5 rounded-lg hover:bg-slate-50 transition text-[12.5px] text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false)
+                          setStatusMessage('Detector v1.0.0')
+                        }}
+                      >
+                        <span className="h-5 w-5 rounded-md bg-slate-100/80 text-slate-500 flex items-center justify-center shrink-0 group-hover/item:bg-[var(--ui-accent)]/12">
+                          <Sparkles className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-left font-medium">About</span>
+                      </button>
+                    </div>
+                  </motion.div>
                 )}
-              >
-                <div className="w-[220px] rounded-2xl bg-white/80 border border-slate-200/70 shadow-2xl backdrop-blur p-2">
-                  <div className="space-y-1">
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={() => setStatusMessage('Manage Prompt Apps not implemented yet')}
-                    >
-                      <SlidersHorizontal className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">
-                        Manage Prompt Apps
-                      </span>
-                    </button>
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={openMemory}
-                    >
-                      <Bookmark className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Memory</span>
-                    </button>
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={() => setStatusMessage('Live Coding not implemented yet')}
-                    >
-                      <Code2 className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Live Coding</span>
-                    </button>
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={() => openSettings('general')}
-                    >
-                      <SettingsIcon className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Settings</span>
-                    </button>
-                  </div>
-
-                  <div className="my-2 h-px bg-white/20" />
-
-                  <div className="space-y-1">
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={() =>
-                        setSidebarWidth(clampNumber(SIDEBAR_DEFAULT_WIDTH_PX, SIDEBAR_MIN_WIDTH_PX, getMaxSidebarWidth()))
-                      }
-                    >
-                      <LayoutGrid className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">Reset width</span>
-                    </button>
-                    <button
-                      className="app-nodrag w-full h-10 flex items-center gap-3 px-3 rounded-xl hover:bg-slate-100/80 transition text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent-ring)]"
-                      onClick={() => setStatusMessage('Detector v1.0.0')}
-                    >
-                      <Sparkles className="h-4 w-4 text-slate-500 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-left font-medium text-slate-700">About</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+              </AnimatePresence>
 
               <button
-                className="app-nodrag h-9 w-9 rounded-xl bg-white/80 border border-slate-200/70 shadow-sm text-slate-600 hover:bg-white transition flex items-center justify-center"
+                onClick={() => setIsMoreMenuOpen((v) => !v)}
+                className={cn(
+                  'app-nodrag h-9 w-9 rounded-xl border text-slate-600 transition flex items-center justify-center',
+                  isMoreMenuOpen
+                    ? 'bg-white border-slate-200/80 shadow-[0_8px_20px_rgba(15,23,42,0.12)]'
+                    : 'bg-white/80 border-slate-200/70 shadow-sm hover:bg-white'
+                )}
                 aria-label="More actions"
                 title="More actions"
+                aria-haspopup="menu"
+                aria-expanded={isMoreMenuOpen}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>
@@ -1785,7 +1899,12 @@ export function MainAppShell() {
       </div>
 
       <section className="min-h-0 min-w-0 flex flex-col">
-        <div className="h-12 shrink-0 app-drag" />
+        <div
+          className={cn(
+            'shrink-0 app-drag',
+            route === 'chat' || route === 'settings' ? 'h-6' : 'h-12'
+          )}
+        />
 
         {route === 'home' && (
           <div className="flex-1 min-h-0 flex items-center justify-center px-12 py-14">
@@ -1824,8 +1943,10 @@ export function MainAppShell() {
               </div>
 
               <div className="text-[13px] text-slate-400 mt-1">
-                {settings.apiKey.trim().length === 0
-                  ? 'Please configure an API key to start chatting'
+                {!isChatProviderReady
+                  ? isApiProvider
+                    ? 'Please configure an API key to start chatting'
+                    : 'Please configure Codex CLI to start chatting'
                   : 'Press Cmd+Shift+. to capture your screen at any time'}
               </div>
             </div>
@@ -1833,7 +1954,7 @@ export function MainAppShell() {
         )}
 
         {route === 'settings' && (
-          <div className="flex-1 min-h-0 flex flex-col px-10 py-12">
+          <div className="flex-1 min-h-0 flex flex-col px-10 pt-3 pb-8">
             <div className="mx-auto w-full max-w-4xl min-h-0 flex flex-col">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -2219,21 +2340,39 @@ export function MainAppShell() {
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
                           <div className="text-lg font-semibold text-slate-800">Provider overview</div>
                           <div className="text-sm text-slate-500 mt-1">
-                            Single-provider mode with health checks and prompt controls.
+                            Chat provider mode, routing target, and health checks.
                           </div>
-                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                             <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
-                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Endpoint</div>
-                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">{providerBaseHost}</div>
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Chat provider</div>
+                              <div className="mt-1 text-sm font-medium text-slate-800">{providerDisplayName}</div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">
+                                {isApiProvider ? 'Endpoint' : 'CLI command'}
+                              </div>
+                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">
+                                {isApiProvider ? providerBaseHost : settings.codexCliPath || 'codex'}
+                              </div>
                             </div>
                             <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
                               <div className="text-[11px] uppercase tracking-wide text-slate-400">Model</div>
-                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">{settings.apiModel || '—'}</div>
+                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">
+                                {isApiProvider ? settings.apiModel || '—' : settings.codexCliModel || '(CLI default)'}
+                              </div>
                             </div>
                             <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
-                              <div className="text-[11px] uppercase tracking-wide text-slate-400">API key</div>
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">
+                                {isApiProvider ? 'API key' : 'CLI path'}
+                              </div>
                               <div className="mt-1 text-sm font-medium text-slate-800">
-                                {providerKeyConfigured ? 'Configured' : 'Missing'}
+                                {isApiProvider
+                                  ? providerKeyConfigured
+                                    ? 'Configured'
+                                    : 'Missing'
+                                  : codexPathConfigured
+                                    ? 'Configured'
+                                    : 'Missing'}
                               </div>
                             </div>
                             <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
@@ -2255,7 +2394,7 @@ export function MainAppShell() {
                             <div>
                               <div className="text-lg font-semibold text-slate-800">Connection health</div>
                               <div className="text-sm text-slate-500 mt-1">
-                                Validate API connectivity for current endpoint, model, and key.
+                                Validate {providerDisplayName} connectivity for current chat provider settings.
                               </div>
                             </div>
                             <button
@@ -2301,55 +2440,110 @@ export function MainAppShell() {
                           <div>
                             <div className="text-lg font-semibold text-slate-800">Edit configuration</div>
                             <div className="text-sm text-slate-500 mt-1">
-                              Configure your OpenAI-compatible endpoint and request defaults.
+                              Configure chat routing and provider-specific request defaults.
                             </div>
                           </div>
 
                           <div className="mt-5 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1.5">
-                              <span className="text-xs text-slate-500">API Base URL</span>
-                              <input
-                                value={settings.apiBaseUrl}
-                                onChange={(e) => updateSetting('apiBaseUrl', e.target.value)}
+                              <span className="text-xs text-slate-500">Chat provider</span>
+                              <select
+                                value={settings.chatProvider}
+                                onChange={(e) => updateSetting('chatProvider', e.target.value as ChatProvider)}
                                 className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                                placeholder="https://api.openai.com/v1"
-                              />
+                              >
+                                {CHAT_PROVIDER_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label} · {option.hint}
+                                  </option>
+                                ))}
+                              </select>
                             </label>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <label className="flex flex-col gap-1.5">
-                                <span className="text-xs text-slate-500">Model</span>
-                                <input
-                                  value={settings.apiModel}
-                                  onChange={(e) => updateSetting('apiModel', e.target.value)}
-                                  className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                                  placeholder="gpt-4o"
-                                />
-                              </label>
-                              <label className="flex flex-col gap-1.5">
-                                <span className="text-xs text-slate-500">Timeout (ms)</span>
-                                <input
-                                  type="number"
-                                  min={5000}
-                                  step={1000}
-                                  value={settings.apiTimeoutMs}
-                                  onChange={(e) => updateSetting('apiTimeoutMs', Number(e.target.value || 0))}
-                                  className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                                  placeholder="30000"
-                                />
-                              </label>
-                            </div>
+                            {settings.chatProvider === 'api' ? (
+                              <>
+                                <label className="flex flex-col gap-1.5">
+                                  <span className="text-xs text-slate-500">API Base URL</span>
+                                  <input
+                                    value={settings.apiBaseUrl}
+                                    onChange={(e) => updateSetting('apiBaseUrl', e.target.value)}
+                                    className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                    placeholder="https://api.openai.com/v1"
+                                  />
+                                </label>
 
-                            <label className="flex flex-col gap-1.5">
-                              <span className="text-xs text-slate-500">API Key</span>
-                              <input
-                                type="password"
-                                value={settings.apiKey}
-                                onChange={(e) => updateSetting('apiKey', e.target.value)}
-                                className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                                placeholder="sk-..."
-                              />
-                            </label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <label className="flex flex-col gap-1.5">
+                                    <span className="text-xs text-slate-500">Model</span>
+                                    <input
+                                      value={settings.apiModel}
+                                      onChange={(e) => updateSetting('apiModel', e.target.value)}
+                                      className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                      placeholder="gpt-4o"
+                                    />
+                                  </label>
+                                  <label className="flex flex-col gap-1.5">
+                                    <span className="text-xs text-slate-500">Timeout (ms)</span>
+                                    <input
+                                      type="number"
+                                      min={5000}
+                                      step={1000}
+                                      value={settings.apiTimeoutMs}
+                                      onChange={(e) => updateSetting('apiTimeoutMs', Number(e.target.value || 0))}
+                                      className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                      placeholder="30000"
+                                    />
+                                  </label>
+                                </div>
+
+                                <label className="flex flex-col gap-1.5">
+                                  <span className="text-xs text-slate-500">API Key</span>
+                                  <input
+                                    type="password"
+                                    value={settings.apiKey}
+                                    onChange={(e) => updateSetting('apiKey', e.target.value)}
+                                    className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                    placeholder="sk-..."
+                                  />
+                                </label>
+                              </>
+                            ) : (
+                              <>
+                                <label className="flex flex-col gap-1.5">
+                                  <span className="text-xs text-slate-500">Codex CLI command</span>
+                                  <input
+                                    value={settings.codexCliPath}
+                                    onChange={(e) => updateSetting('codexCliPath', e.target.value)}
+                                    className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                    placeholder="codex"
+                                  />
+                                </label>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <label className="flex flex-col gap-1.5">
+                                    <span className="text-xs text-slate-500">Codex model (optional)</span>
+                                    <input
+                                      value={settings.codexCliModel}
+                                      onChange={(e) => updateSetting('codexCliModel', e.target.value)}
+                                      className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                      placeholder="Use CLI default"
+                                    />
+                                  </label>
+                                  <label className="flex flex-col gap-1.5">
+                                    <span className="text-xs text-slate-500">CLI timeout (ms)</span>
+                                    <input
+                                      type="number"
+                                      min={5000}
+                                      step={1000}
+                                      value={settings.codexCliTimeoutMs}
+                                      onChange={(e) => updateSetting('codexCliTimeoutMs', Number(e.target.value || 0))}
+                                      className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                      placeholder="120000"
+                                    />
+                                  </label>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -2655,7 +2849,7 @@ export function MainAppShell() {
                         ) : (
                           <>
                             <Sparkles className="h-4 w-4" />
-                            Test API
+                            Test {providerDisplayName}
                           </>
                         )}
                       </button>
@@ -2756,38 +2950,9 @@ export function MainAppShell() {
         )}
 
         {route === 'chat' && (
-          <div className="flex-1 min-h-0 flex flex-col px-10 py-14">
-            <div className="mx-auto w-full max-w-3xl min-h-0 flex flex-col">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-xs text-slate-400">Chat</div>
-                  <div className="text-lg font-semibold text-slate-800 mt-1">
-                    {activeRecord ? getRecordTitle(activeRecord) : 'New Chat'}
-                  </div>
-                  {activeRecord ? (
-                    <div className="text-xs text-slate-400 mt-1 truncate">
-                      {formatTime(activeRecord.timestamp)}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-slate-400 mt-1">
-                      No screen context selected
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openSettings('general')}
-                    className="app-nodrag h-9 w-9 rounded-xl bg-white/70 border border-slate-200/60 shadow-sm text-slate-600 hover:bg-white transition flex items-center justify-center"
-                    aria-label="Settings"
-                    title="Settings"
-                  >
-                    <SettingsIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 flex-1 min-h-0 rounded-3xl bg-white border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 flex flex-col px-2 pt-0 pb-2">
+            <div className="w-full min-h-0 flex-1 flex flex-col">
+              <div className="flex-1 min-h-0 rounded-[20px] bg-white border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
                 <div className="border-b border-slate-200/60 bg-slate-50/60">
                   <div className="px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
@@ -3189,13 +3354,13 @@ export function MainAppShell() {
                           void sendMessage()
                         }
                       }}
-                      placeholder={settings.apiKey.trim().length === 0 ? 'Set API key in Settings first…' : 'Type a message…'}
-                      disabled={isChatting || settings.apiKey.trim().length === 0}
+                      placeholder={chatInputPlaceholder}
+                      disabled={isChatting || !isChatProviderReady}
                       className="app-nodrag flex-1 rounded-xl bg-slate-50 border border-slate-200/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)] disabled:opacity-60"
                     />
                     <button
                       onClick={() => void sendMessage()}
-                      disabled={isChatting || chatInput.trim().length === 0 || settings.apiKey.trim().length === 0}
+                      disabled={isChatting || chatInput.trim().length === 0 || !isChatProviderReady}
                       className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-3.5 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
                     >
                       <Send className="h-4 w-4" />
