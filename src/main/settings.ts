@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { AppSettings, ThemeMode } from '@shared/types'
+import { AppSettings, ChatProvider, ThemeMode } from '@shared/types'
 
 const SETTINGS_FILE = join(app.getPath('userData'), 'settings.json')
 const LEGACY_SETTINGS_FILES = Array.from(
@@ -11,11 +11,18 @@ const LEGACY_SETTINGS_FILES = Array.from(
   ])
 ).filter((candidate) => candidate !== SETTINGS_FILE)
 const DEFAULT_TIMEOUT_MS = 30000
+const DEFAULT_CODEX_CLI_TIMEOUT_MS = 120000
 const DEFAULT_MAX_STORAGE_BYTES = 512 * 1024 * 1024
 const MIN_MAX_STORAGE_BYTES = 50 * 1024 * 1024
 const MAX_MAX_STORAGE_BYTES = 5 * 1024 * 1024 * 1024
 const DEFAULT_THEME_MODE: ThemeMode = 'light'
+const DEFAULT_CHAT_PROVIDER: ChatProvider = 'api'
+const DEFAULT_CODEX_CLI_PATH = 'codex'
 const DEFAULT_SHOW_DOCK_ICON = false
+
+function normalizeChatProvider(raw: unknown): ChatProvider {
+  return raw === 'codex-cli' ? 'codex-cli' : 'api'
+}
 
 function normalizeThemeMode(raw: unknown): ThemeMode {
   if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
@@ -40,8 +47,10 @@ function normalizeOptionalTemplate(raw: unknown): string | undefined {
 
 function getDefaultSettings(): AppSettings {
   const timeoutFromEnv = Number(process.env.API_TIMEOUT_MS)
+  const codexCliTimeoutFromEnv = Number(process.env.CODEX_CLI_TIMEOUT_MS)
   const maxStorageFromEnv = Number(process.env.MAX_STORAGE_BYTES)
   const themeModeFromEnv = normalizeThemeMode((process.env.THEME_MODE || '').trim().toLowerCase())
+  const chatProviderFromEnv = normalizeChatProvider((process.env.CHAT_PROVIDER || '').trim().toLowerCase())
 
   return {
     apiBaseUrl: (process.env.API_BASE_URL || 'https://api.openai.com/v1').trim(),
@@ -51,6 +60,13 @@ function getDefaultSettings(): AppSettings {
       Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0
         ? Math.floor(timeoutFromEnv)
         : DEFAULT_TIMEOUT_MS,
+    chatProvider: chatProviderFromEnv,
+    codexCliPath: (process.env.CODEX_CLI_PATH || DEFAULT_CODEX_CLI_PATH).trim() || DEFAULT_CODEX_CLI_PATH,
+    codexCliModel: (process.env.CODEX_CLI_MODEL || '').trim(),
+    codexCliTimeoutMs:
+      Number.isFinite(codexCliTimeoutFromEnv) && codexCliTimeoutFromEnv > 0
+        ? Math.floor(codexCliTimeoutFromEnv)
+        : DEFAULT_CODEX_CLI_TIMEOUT_MS,
     maxStorageBytes:
       Number.isFinite(maxStorageFromEnv) &&
       maxStorageFromEnv >= MIN_MAX_STORAGE_BYTES &&
@@ -141,6 +157,21 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     Number.isFinite(timeoutCandidate) && timeoutCandidate > 0
       ? Math.floor(timeoutCandidate)
       : defaults.apiTimeoutMs
+  const chatProvider = normalizeChatProvider((input as Partial<AppSettings> & { chatProvider?: unknown }).chatProvider)
+  const codexCliPath =
+    typeof input.codexCliPath === 'string' && input.codexCliPath.trim().length > 0
+      ? input.codexCliPath.trim()
+      : defaults.codexCliPath
+  const codexCliModel =
+    typeof input.codexCliModel === 'string' ? input.codexCliModel.trim() : defaults.codexCliModel
+  const codexCliTimeoutCandidate =
+    typeof input.codexCliTimeoutMs === 'number'
+      ? input.codexCliTimeoutMs
+      : Number((input as Partial<AppSettings> & { codexCliTimeoutMs?: string }).codexCliTimeoutMs)
+  const codexCliTimeoutMs =
+    Number.isFinite(codexCliTimeoutCandidate) && codexCliTimeoutCandidate > 0
+      ? Math.floor(codexCliTimeoutCandidate)
+      : defaults.codexCliTimeoutMs
   const storageCandidate =
     typeof input.maxStorageBytes === 'number'
       ? input.maxStorageBytes
@@ -180,6 +211,10 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     apiKey,
     apiModel,
     apiTimeoutMs,
+    chatProvider,
+    codexCliPath,
+    codexCliModel,
+    codexCliTimeoutMs,
     maxStorageBytes,
     themeMode,
     launchAtLogin,

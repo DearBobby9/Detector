@@ -165,6 +165,7 @@ export interface HistoryRecord {
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type ChatProvider = 'api' | 'codex-cli'
 
 export type PermissionStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'
 
@@ -196,6 +197,10 @@ export interface AppSettings {
   apiKey: string
   apiModel: string
   apiTimeoutMs: number
+  chatProvider: ChatProvider
+  codexCliPath: string
+  codexCliModel: string
+  codexCliTimeoutMs: number
   maxStorageBytes: number
   themeMode: ThemeMode
   launchAtLogin: boolean

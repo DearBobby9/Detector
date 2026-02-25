@@ -1,6 +1,7 @@
 import { AppSettings, ChatMessage } from '@shared/types'
 import { getSettings } from './settings'
 import { parseDetectionResult } from './claude-api'
+import { sendCodexChat } from './chat-codex-cli'
 
 const SYSTEM_CHAT_PROMPT = `You are a helpful desktop assistant.
 
@@ -31,6 +32,11 @@ function mergeSettings(override?: Partial<AppSettings>): AppSettings {
     apiKey: typeof override.apiKey === 'string' ? override.apiKey : current.apiKey,
     apiModel: typeof override.apiModel === 'string' ? override.apiModel : current.apiModel,
     apiTimeoutMs: typeof override.apiTimeoutMs === 'number' ? override.apiTimeoutMs : current.apiTimeoutMs,
+    chatProvider: override.chatProvider || current.chatProvider,
+    codexCliPath: typeof override.codexCliPath === 'string' ? override.codexCliPath : current.codexCliPath,
+    codexCliModel: typeof override.codexCliModel === 'string' ? override.codexCliModel : current.codexCliModel,
+    codexCliTimeoutMs:
+      typeof override.codexCliTimeoutMs === 'number' ? override.codexCliTimeoutMs : current.codexCliTimeoutMs,
     maxStorageBytes:
       typeof override.maxStorageBytes === 'number' ? override.maxStorageBytes : current.maxStorageBytes,
     themeMode: override.themeMode || current.themeMode,
@@ -55,6 +61,45 @@ function mergeSettings(override?: Partial<AppSettings>): AppSettings {
     chatPromptTemplate:
       typeof override.chatPromptTemplate === 'string' ? override.chatPromptTemplate : current.chatPromptTemplate
   }
+}
+
+function getChatSystemPrompt(settings: AppSettings): string {
+  if (typeof settings.chatPromptTemplate === 'string' && settings.chatPromptTemplate.trim().length > 0) {
+    return settings.chatPromptTemplate.trim()
+  }
+  return SYSTEM_CHAT_PROMPT
+}
+
+function getOutputLanguageInstruction(settings: AppSettings): string | null {
+  const outputLanguage = settings.outputLanguageOverride.trim()
+  if (!outputLanguage) return null
+  return `Always reply in ${outputLanguage}.`
+}
+
+function buildCodexChatPrompt(contextText: string, messages: ChatMessage[], settings: AppSettings): string {
+  const systemPrompt = getChatSystemPrompt(settings)
+  const languageInstruction = getOutputLanguageInstruction(settings)
+  const normalizedContext = contextText.trim().length > 0 ? contextText.trim() : '(none)'
+
+  const transcript = messages
+    .map((msg) => {
+      const roleLabel = msg.role === 'assistant' ? 'Assistant' : 'User'
+      return `${roleLabel}:\n${msg.content}`
+    })
+    .join('\n\n')
+
+  const sections = [
+    'System instruction:',
+    systemPrompt,
+    languageInstruction,
+    'Screen context:',
+    normalizedContext,
+    'Conversation transcript (oldest to newest):',
+    transcript,
+    'Reply as Assistant to the latest User message. Keep responses concise, practical, and specific.'
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  return sections.join('\n\n')
 }
 
 async function postChatCompletions(
@@ -110,11 +155,30 @@ async function postChatCompletions(
 
 export async function apiTest(override?: Partial<AppSettings>): Promise<{ ok: boolean; message: string; latencyMs: number }> {
   const settings = mergeSettings(override)
+
+  const start = Date.now()
+
+  if (settings.chatProvider === 'codex-cli') {
+    try {
+      const ping = await sendCodexChat('Return ONLY this exact text: OK', settings)
+      if (ping.trim() !== 'OK') {
+        return {
+          ok: false,
+          message: `Codex CLI ping check failed. Expected "OK", got "${ping.trim().slice(0, 32)}".`,
+          latencyMs: Date.now() - start
+        }
+      }
+      return { ok: true, message: 'Codex CLI test succeeded (strict ping)', latencyMs: Date.now() - start }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, message, latencyMs: Date.now() - start }
+    }
+  }
+
   if (!settings.apiKey) {
     return { ok: false, message: 'API key is empty', latencyMs: 0 }
   }
 
-  const start = Date.now()
   try {
     const ping = await postChatCompletions(
       settings,
@@ -176,23 +240,23 @@ export async function sendChat(
   override?: Partial<AppSettings>
 ): Promise<string> {
   const settings = mergeSettings(override)
+  const systemPrompt = getChatSystemPrompt(settings)
+  const languageInstruction = getOutputLanguageInstruction(settings)
+
+  if (settings.chatProvider === 'codex-cli') {
+    const prompt = buildCodexChatPrompt(contextText, messages, settings)
+    return sendCodexChat(prompt, settings)
+  }
 
   if (!settings.apiKey) {
     throw new Error('API key not set')
   }
 
   const apiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
-  const systemPrompt =
-    typeof settings.chatPromptTemplate === 'string' && settings.chatPromptTemplate.trim().length > 0
-      ? settings.chatPromptTemplate.trim()
-      : SYSTEM_CHAT_PROMPT
 
   apiMessages.push({ role: 'system', content: systemPrompt })
-  if (typeof settings.outputLanguageOverride === 'string' && settings.outputLanguageOverride.trim().length > 0) {
-    apiMessages.push({
-      role: 'system',
-      content: `Always reply in ${settings.outputLanguageOverride.trim()}.`
-    })
+  if (languageInstruction) {
+    apiMessages.push({ role: 'system', content: languageInstruction })
   }
   apiMessages.push({ role: 'system', content: `Screen context:\n${contextText}` })
 

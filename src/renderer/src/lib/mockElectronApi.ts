@@ -23,6 +23,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
+  chatProvider: 'api',
+  codexCliPath: 'codex',
+  codexCliModel: '',
+  codexCliTimeoutMs: 120000,
   maxStorageBytes: 512 * 1024 * 1024,
   themeMode: 'light',
   launchAtLogin: false,
@@ -503,7 +507,8 @@ export function createMockElectronAPI(): ElectronAPI {
       const start = performance.now()
       await sleep(220)
       const latencyMs = Math.round(performance.now() - start)
-      return { ok: true, message: 'ok', latencyMs }
+      const label = settings.chatProvider === 'codex-cli' ? 'Codex CLI' : 'API'
+      return { ok: true, message: `${label} mock health check ok`, latencyMs }
     },
     getHistory: async () => {
       return history
