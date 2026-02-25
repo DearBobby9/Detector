@@ -3,23 +3,30 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
 // Panel size rules:
-// - Loading ("collapsed") should be a slim bar near the top.
-// - Result ("expanded") can be larger to fit email draft + memory candidates.
-const PANEL_WIDTH_COLLAPSED = 380
-const PANEL_HEIGHT_COLLAPSED = 72
-const PANEL_WIDTH_EXPANDED = 460
-const PANEL_HEIGHT_EXPANDED = 360
-const PANEL_WIDTH_DETAIL = 900
-const PANEL_HEIGHT_DETAIL = 620
-const PANEL_TOP_OFFSET_PX = 12
-const BLUR_HIDE_GRACE_MS = 300
+// - Loading/result default to a slim strip attached to the top edge.
+// - Hover expansion opens a compact context drawer.
+// - Candidate detail stays a centered large modal.
+const PANEL_WIDTH_COLLAPSED = 620
+const PANEL_HEIGHT_COLLAPSED = 42
+const PANEL_WIDTH_EXPANDED = 720
+const PANEL_HEIGHT_EXPANDED = 442
+const PANEL_WIDTH_DETAIL = 960
+const PANEL_HEIGHT_DETAIL = 660
+const PANEL_TOP_OFFSET_PX = 0
 
 let panelWindow: BrowserWindow | null = null
-let lastShownAt = 0
 let lastMode: PanelMode = 'collapsed'
 let lastNonDetailMode: Exclude<PanelMode, 'detail'> = 'collapsed'
 
 type PanelMode = 'collapsed' | 'expanded' | 'detail'
+
+function setPanelBounds(
+  bounds: { x: number; y: number; width: number; height: number },
+  animate = false
+): void {
+  if (!panelWindow) return
+  panelWindow.setBounds(bounds, animate && process.platform === 'darwin')
+}
 
 function getModeSize(mode: PanelMode): { width: number; height: number } {
   if (mode === 'collapsed') {
@@ -63,9 +70,7 @@ export function createPanelWindow(): BrowserWindow {
     movable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    hasShadow: true,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
+    hasShadow: false,
     webPreferences: {
       preload: join(__dirname, '../preload/panel.js'),
       sandbox: false
@@ -81,14 +86,6 @@ export function createPanelWindow(): BrowserWindow {
 
   // Load the renderer
   loadRenderer(panelWindow, 'panel')
-
-  // Hide when losing focus
-  panelWindow.on('blur', () => {
-    if (Date.now() - lastShownAt < BLUR_HIDE_GRACE_MS) {
-      return
-    }
-    hidePanel()
-  })
 
   panelWindow.on('closed', () => {
     panelWindow = null
@@ -112,14 +109,25 @@ export function showPanel(mode: PanelMode = 'expanded'): void {
   const panelX = Math.round(x + (width - size.width) / 2)
   const panelY = mode === 'detail' ? Math.round(y + (height - size.height) / 2) : y + PANEL_TOP_OFFSET_PX
 
-  panelWindow.setBounds({ x: panelX, y: panelY, width: size.width, height: size.height })
-  lastShownAt = Date.now()
+  setPanelBounds({ x: panelX, y: panelY, width: size.width, height: size.height }, mode !== 'collapsed')
   lastMode = mode
   if (mode !== 'detail') {
     lastNonDetailMode = mode
   }
   panelWindow.showInactive()
   console.log('[PanelWindow] Shown at', panelX, panelY)
+}
+
+export function expandPanel(): void {
+  if (!panelWindow) return
+  if (lastMode === 'detail') return
+  resizePanel('expanded')
+}
+
+export function collapsePanel(): void {
+  if (!panelWindow) return
+  if (lastMode === 'detail') return
+  resizePanel('collapsed')
 }
 
 export function resizePanel(mode: PanelMode): void {
@@ -133,7 +141,8 @@ export function resizePanel(mode: PanelMode): void {
   const nextX = Math.round(prev.x + (prev.width - size.width) / 2)
   const nextY = mode === 'detail' ? Math.round(y + (height - size.height) / 2) : y + PANEL_TOP_OFFSET_PX
 
-  panelWindow.setBounds({ x: nextX, y: nextY, width: size.width, height: size.height })
+  const shouldAnimate = mode !== lastMode
+  setPanelBounds({ x: nextX, y: nextY, width: size.width, height: size.height }, shouldAnimate)
   lastMode = mode
   if (mode !== 'detail') {
     lastNonDetailMode = mode

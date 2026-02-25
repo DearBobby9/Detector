@@ -5,6 +5,9 @@ import type {
   DetectionResult,
   HistoryRecord,
   MemoryItem,
+  ScreenPermissionRequestResult,
+  ScreenPermissionSettingsResult,
+  SettingsRuntimeStatus,
   ScreenshotAsset,
   StorageCategoryUsage,
   StorageEnforceResult,
@@ -21,7 +24,15 @@ const DEFAULT_SETTINGS: AppSettings = {
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
   maxStorageBytes: 512 * 1024 * 1024,
-  themeMode: 'light'
+  themeMode: 'light',
+  launchAtLogin: false,
+  showDockIcon: false,
+  shareCrashReports: false,
+  shareAnonymousUsage: false,
+  showTimelineIcons: false,
+  outputLanguageOverride: '',
+  capturePromptTemplate: undefined,
+  chatPromptTemplate: undefined
 }
 
 function sleep(ms: number): Promise<void> {
@@ -256,6 +267,12 @@ export function createMockElectronAPI(): ElectronAPI {
   let nextHistoryId = (history[history.length - 1]?.id ?? 0) + 1
   let memory = loadMemory()
   let nextMemoryId = (memory[memory.length - 1]?.id ?? 0) + 1
+  let runtimeStatus: SettingsRuntimeStatus = {
+    screenPermission: 'granted',
+    automationPermission: 'granted',
+    captureService: 'idle',
+    lastCheckedAt: Date.now()
+  }
   const mockUserDataRoot = '/Users/you/Library/Application Support/detector'
   const mockScreenshotDataByPath = new Map<string, string>()
 
@@ -338,6 +355,12 @@ export function createMockElectronAPI(): ElectronAPI {
     dismiss: () => {
       // noop in browser preview
     },
+    panelExpand: () => {
+      // noop in browser preview
+    },
+    panelCollapse: () => {
+      // noop in browser preview
+    },
     panelEnterDetailView: () => {
       // noop in browser preview
     },
@@ -363,6 +386,41 @@ export function createMockElectronAPI(): ElectronAPI {
       settings = { ...settings, ...next }
       saveSettings(settings)
       return settings
+    },
+    getSettingsStatusCheck: async () => {
+      return runtimeStatus
+    },
+    runSettingsStatusCheck: async () => {
+      await sleep(240)
+      runtimeStatus = {
+        screenPermission: 'granted',
+        automationPermission: 'granted',
+        captureService: 'idle',
+        lastCheckedAt: Date.now()
+      }
+      return runtimeStatus
+    },
+    requestScreenPermission: async (): Promise<ScreenPermissionRequestResult> => {
+      await sleep(180)
+      runtimeStatus = {
+        ...runtimeStatus,
+        screenPermission: 'granted',
+        lastCheckedAt: Date.now()
+      }
+      return {
+        ok: true,
+        status: 'granted',
+        prompted: true,
+        message: 'Screen recording permission granted (mock).'
+      }
+    },
+    openScreenPermissionSettings: async (): Promise<ScreenPermissionSettingsResult> => {
+      await sleep(60)
+      return {
+        ok: true,
+        status: runtimeStatus.screenPermission,
+        url: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+      }
     },
     triggerCapture: async () => {
       for (const cb of loadingListeners) cb()
@@ -559,6 +617,26 @@ export function createMockElectronAPI(): ElectronAPI {
         // ignore
       }
       return { ok: true, path: resolved }
+    },
+    exportTimelineMarkdown: async (payload: {
+      fromDate?: string
+      toDate?: string
+    }): Promise<{ ok: boolean; path?: string; message?: string; historyCount?: number; memoryCount?: number }> => {
+      await sleep(150)
+      return {
+        ok: true,
+        path: `${mockUserDataRoot}/exports/detector-timeline-${payload.fromDate || 'all'}-${payload.toDate || 'all'}.md`,
+        historyCount: history.length,
+        memoryCount: memory.length
+      }
+    },
+    debugReprocessDay: async (payload: { day: string }): Promise<{ ok: boolean; message: string; count?: number }> => {
+      await sleep(100)
+      return {
+        ok: true,
+        message: `Debug reprocess simulated for ${payload.day}`,
+        count: history.length
+      }
     }
   }
 }

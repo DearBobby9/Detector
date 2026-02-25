@@ -49,9 +49,8 @@ export function usePanel() {
   const copyToClipboard = useCallback(
     (text: string) => {
       window.electronAPI.clipboardWrite(text)
-      dismiss()
     },
-    [dismiss]
+    []
   )
 
   return { state, dismiss, copyToClipboard }

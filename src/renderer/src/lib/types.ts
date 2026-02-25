@@ -4,6 +4,9 @@ import type {
   DetectionResult,
   HistoryRecord,
   MemoryItem,
+  ScreenPermissionRequestResult,
+  ScreenPermissionSettingsResult,
+  SettingsRuntimeStatus,
   StorageEnforceResult,
   StorageLimitUpdateResult,
   StorageUsageSummary
@@ -20,12 +23,18 @@ export interface ElectronAPI {
   onShowResult: (callback: (result: DetectionResult) => void) => () => void
   onShowError: (callback: (message: string) => void) => () => void
   dismiss: () => void
+  panelExpand: () => void
+  panelCollapse: () => void
   panelEnterDetailView: () => void
   panelExitDetailView: () => void
   clipboardWrite: (text: string) => void
   panelReady: () => void
   getSettings: () => Promise<AppSettings>
   saveSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>
+  getSettingsStatusCheck: () => Promise<SettingsRuntimeStatus>
+  runSettingsStatusCheck: () => Promise<SettingsRuntimeStatus>
+  requestScreenPermission: () => Promise<ScreenPermissionRequestResult>
+  openScreenPermissionSettings: () => Promise<ScreenPermissionSettingsResult>
   triggerCapture: () => Promise<{ ok: boolean }>
   apiTest: (settings?: Partial<AppSettings>) => Promise<{ ok: boolean; message: string; latencyMs: number }>
   getHistory: () => Promise<HistoryRecord[]>
@@ -40,6 +49,11 @@ export interface ElectronAPI {
   enforceStorageLimit: () => Promise<StorageEnforceResult>
   revealStoragePath: (categoryOrPath: string) => Promise<{ ok: boolean; path: string }>
   copyStoragePath: (categoryOrPath: string) => Promise<{ ok: boolean; path: string }>
+  exportTimelineMarkdown: (payload: {
+    fromDate?: string
+    toDate?: string
+  }) => Promise<{ ok: boolean; path?: string; message?: string; historyCount?: number; memoryCount?: number }>
+  debugReprocessDay: (payload: { day: string }) => Promise<{ ok: boolean; message: string; count?: number }>
 }
 
 declare global {

@@ -2,8 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import {
   AppSettings,
+  SettingsRuntimeStatus,
   DetectionResult,
   MemoryItem,
+  ScreenPermissionRequestResult,
+  ScreenPermissionSettingsResult,
   StorageEnforceResult,
   StorageLimitUpdateResult,
   StorageUsageSummary
@@ -33,6 +36,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send(IPC.PANEL_DISMISS)
   },
 
+  panelExpand: () => {
+    ipcRenderer.send(IPC.PANEL_EXPAND)
+  },
+
+  panelCollapse: () => {
+    ipcRenderer.send(IPC.PANEL_COLLAPSE)
+  },
+
   panelEnterDetailView: () => {
     ipcRenderer.send(IPC.PANEL_ENTER_DETAIL_VIEW)
   },
@@ -55,6 +66,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => {
     return ipcRenderer.invoke(IPC.SETTINGS_SAVE, settings)
+  },
+
+  getSettingsStatusCheck: (): Promise<SettingsRuntimeStatus> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_STATUS_CHECK_GET)
+  },
+
+  runSettingsStatusCheck: (): Promise<SettingsRuntimeStatus> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_STATUS_CHECK_RUN)
+  },
+
+  requestScreenPermission: (): Promise<ScreenPermissionRequestResult> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_SCREEN_PERMISSION_REQUEST)
+  },
+
+  openScreenPermissionSettings: (): Promise<ScreenPermissionSettingsResult> => {
+    return ipcRenderer.invoke(IPC.SETTINGS_SCREEN_PERMISSION_OPEN)
   },
 
   triggerCapture: (): Promise<{ ok: boolean }> => {
@@ -105,5 +132,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   copyStoragePath: (categoryOrPath: string): Promise<{ ok: boolean; path: string }> => {
     return ipcRenderer.invoke(IPC.STORAGE_COPY_PATH, categoryOrPath)
+  },
+
+  exportTimelineMarkdown: (
+    payload: { fromDate?: string; toDate?: string }
+  ): Promise<{ ok: boolean; path?: string; message?: string; historyCount?: number; memoryCount?: number }> => {
+    return ipcRenderer.invoke(IPC.OTHER_EXPORT_TIMELINE, payload)
+  },
+
+  debugReprocessDay: (payload: { day: string }): Promise<{ ok: boolean; message: string; count?: number }> => {
+    return ipcRenderer.invoke(IPC.DEBUG_REPROCESS_DAY, payload)
   }
 })

@@ -3,12 +3,18 @@ export const IPC = {
   PANEL_SHOW_RESULT: 'panel:show-result',
   PANEL_SHOW_ERROR: 'panel:show-error',
   PANEL_DISMISS: 'panel:dismiss',
+  PANEL_EXPAND: 'panel:expand',
+  PANEL_COLLAPSE: 'panel:collapse',
   PANEL_ENTER_DETAIL_VIEW: 'panel:enter-detail-view',
   PANEL_EXIT_DETAIL_VIEW: 'panel:exit-detail-view',
   CLIPBOARD_WRITE: 'clipboard:write',
   PANEL_READY: 'panel:ready',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
+  SETTINGS_STATUS_CHECK_GET: 'settings:status-check:get',
+  SETTINGS_STATUS_CHECK_RUN: 'settings:status-check:run',
+  SETTINGS_SCREEN_PERMISSION_REQUEST: 'settings:screen-permission:request',
+  SETTINGS_SCREEN_PERMISSION_OPEN: 'settings:screen-permission:open',
   CAPTURE_TRIGGER: 'capture:trigger',
   API_TEST: 'api:test',
   HISTORY_LIST: 'history:list',
@@ -20,5 +26,7 @@ export const IPC = {
   STORAGE_SET_LIMIT: 'storage:set-limit',
   STORAGE_ENFORCE_LIMIT: 'storage:enforce-limit',
   STORAGE_REVEAL_PATH: 'storage:reveal-path',
-  STORAGE_COPY_PATH: 'storage:copy-path'
+  STORAGE_COPY_PATH: 'storage:copy-path',
+  OTHER_EXPORT_TIMELINE: 'other:export-timeline',
+  DEBUG_REPROCESS_DAY: 'debug:reprocess-day'
 } as const

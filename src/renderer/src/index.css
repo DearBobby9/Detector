@@ -131,6 +131,10 @@ body:is([data-view="app"], [data-view="panel"])[data-theme-mode="light"] {
   --ui-overlay: rgba(70, 63, 58, 0.26);
   --ui-shadow-soft: 0 14px 34px -24px rgba(70, 63, 58, 0.36);
   --ui-shadow-strong: 0 28px 66px -38px rgba(70, 63, 58, 0.46);
+  --ui-panel-surface-top: #f6f5f0;
+  --ui-panel-surface-bottom: #f1efea;
+  --ui-panel-content-bg: #f3f1ec;
+  --ui-panel-header-bg: #f6f5f0;
   color-scheme: light;
 }
 
@@ -164,6 +168,10 @@ body:is([data-view="app"], [data-view="panel"])[data-theme-mode="dark"] {
   --ui-overlay: rgba(70, 63, 58, 0.62);
   --ui-shadow-soft: 0 14px 34px -26px rgba(70, 63, 58, 0.6);
   --ui-shadow-strong: 0 32px 78px -42px rgba(70, 63, 58, 0.72);
+  --ui-panel-surface-top: #4d4641;
+  --ui-panel-surface-bottom: #453f3a;
+  --ui-panel-content-bg: #4a433e;
+  --ui-panel-header-bg: #4f4843;
   color-scheme: dark;
 }
 
@@ -272,6 +280,71 @@ body:is([data-view="app"], [data-view="panel"]) .app-screenshot-preview-bg {
       color-mix(in srgb, var(--ui-surface-strong) 86%, transparent) 0%,
       color-mix(in srgb, var(--ui-surface-muted) 86%, transparent) 100%
     );
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-shell {
+  position: relative;
+  transform-origin: top center;
+  background: linear-gradient(180deg, var(--ui-panel-surface-top) 0%, var(--ui-panel-surface-bottom) 100%);
+  border: 1px solid color-mix(in srgb, var(--ui-border-strong) 60%, transparent);
+  border-top: 0;
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 20px 42px -30px color-mix(in srgb, var(--ui-taupe) 40%, transparent);
+  transition:
+    border-radius 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 220ms ease;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-shell[data-expanded="true"] {
+  border-radius: 0 0 24px 24px;
+  box-shadow: 0 34px 72px -42px color-mix(in srgb, var(--ui-taupe) 50%, transparent);
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-header {
+  border-bottom: 0;
+  transition:
+    border-color 220ms ease,
+    background-color 220ms ease;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-shell[data-expanded="true"] .app-panel-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-border) 74%, transparent);
+  background-color: var(--ui-panel-header-bg);
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-body {
+  height: calc(100% - 42px);
+  padding: 0 10px 10px;
+  min-height: 0;
+  background: var(--ui-panel-content-bg);
+  transform-origin: top center;
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 220ms ease;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-body[data-visible="false"] {
+  opacity: 0;
+  transform: translateY(-8px) scaleY(0.985);
+  filter: blur(0.4px);
+  pointer-events: none;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-body[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  filter: blur(0);
+  pointer-events: auto;
+}
+
+body:is([data-view="app"], [data-view="panel"]) .app-panel-hover-buffer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -14px;
+  height: 14px;
 }
 
 /* Map existing utility-heavy classes to palette tokens so we can theme without rewriting every node. */

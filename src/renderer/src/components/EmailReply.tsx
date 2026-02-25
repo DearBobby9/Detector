@@ -1,27 +1,17 @@
-import { Mail, Copy, X } from 'lucide-react'
+import { Mail, Copy } from 'lucide-react'
 import type { EmailReplyResult } from '@shared/types'
 
 interface Props {
   data: EmailReplyResult
   onCopy: (text: string) => void
-  onDismiss: () => void
 }
 
-export function EmailReply({ data, onCopy, onDismiss }: Props) {
+export function EmailReply({ data, onCopy }: Props) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Mail className="h-4 w-4 text-blue-400" />
-          <span className="text-xs font-medium text-muted-foreground">Email Reply Draft</span>
-        </div>
-        <button
-          onClick={onDismiss}
-          className="p-1 rounded-md hover:bg-white/10 transition-colors"
-          aria-label="Dismiss"
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </button>
+      <div className="flex items-center gap-2">
+        <Mail className="h-4 w-4 text-blue-400" />
+        <span className="text-xs font-medium text-muted-foreground">Email Reply Draft</span>
       </div>
 
       <div className="text-xs text-muted-foreground">

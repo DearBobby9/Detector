@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookmarkPlus, Check, ChevronDown, Copy, Mail, X } from 'lucide-react'
 import type { CaptureAnalysisResult, MemoryCandidate } from '@shared/types'
 
 interface Props {
   data: CaptureAnalysisResult
   onCopy: (text: string) => void
-  onDismiss: () => void
+  onDetailViewChange?: (isOpen: boolean) => void
+  detailCloseSignal?: number
 }
 
 function formatCandidateForCopy(c: MemoryCandidate): string {
@@ -22,13 +23,14 @@ function parseLineList(details: string): string[] {
     .filter(Boolean)
 }
 
-export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
+export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseSignal }: Props) {
   const [savingIndex, setSavingIndex] = useState<number | null>(null)
   const [savedIndexes, setSavedIndexes] = useState<Set<number>>(() => new Set())
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chromeTabsExpanded, setChromeTabsExpanded] = useState(false)
   const [chromeTabsPopoverOpen, setChromeTabsPopoverOpen] = useState(false)
   const [expandedCandidateIndex, setExpandedCandidateIndex] = useState<number | null>(null)
+  const lastDetailCloseSignalRef = useRef(detailCloseSignal ?? 0)
 
   const emailDetected = Boolean(data.email?.detected)
   const emailDraftText =
@@ -95,6 +97,14 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
     }
   }, [expandedCandidateIndex, memoryCandidates])
 
+  useEffect(() => {
+    const nextSignal = detailCloseSignal ?? 0
+    if (nextSignal === lastDetailCloseSignalRef.current) return
+    lastDetailCloseSignalRef.current = nextSignal
+    if (expandedCandidateIndex == null) return
+    setExpandedCandidateIndex(null)
+  }, [detailCloseSignal, expandedCandidateIndex])
+
   const saveCandidate = async (candidate: MemoryCandidate, index: number) => {
     if (savingIndex !== null) return
     if (savedIndexes.has(index)) return
@@ -121,20 +131,20 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
   const openCandidateDetail = (index: number) => {
     if (!Number.isFinite(index) || index < 0) return
     setExpandedCandidateIndex(index)
-    window.electronAPI.panelEnterDetailView()
+    onDetailViewChange?.(true)
   }
 
   const closeCandidateDetail = () => {
     setExpandedCandidateIndex(null)
-    window.electronAPI.panelExitDetailView()
+    onDetailViewChange?.(false)
   }
 
   useEffect(() => {
     if (expandedCandidateIndex == null) return
     return () => {
-      window.electronAPI.panelExitDetailView()
+      onDetailViewChange?.(false)
     }
-  }, [expandedCandidateIndex])
+  }, [expandedCandidateIndex, onDetailViewChange])
 
   const renderChromeTabsInline = () => {
     if (!chromeTabsCandidate) return null
@@ -321,7 +331,7 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
 
   return (
     <div className="flex flex-col gap-3 h-full min-h-0">
-      <div className="flex items-start justify-between gap-3 relative">
+      <div className="flex items-start gap-3 relative">
         <div className="min-w-0">
           <div className="text-xs font-medium text-muted-foreground">Capture</div>
           <div className="text-sm font-medium text-foreground truncate">{data.screenTitle}</div>
@@ -341,14 +351,6 @@ export function CaptureAnalysis({ data, onCopy, onDismiss }: Props) {
             </div>
           )}
         </div>
-        <button
-          onClick={onDismiss}
-          className="p-1 rounded-md hover:bg-white/10 transition-colors"
-          aria-label="Dismiss"
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </button>
-
         {tabsUi === 'c' && chromeTabsCandidate && chromeTabsPopoverOpen && (
           <div className="absolute top-full left-0 right-0 mt-2 z-20">
             {renderChromeTabsInline()}

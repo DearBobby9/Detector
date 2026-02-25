@@ -9,16 +9,16 @@ interface TrayHandlers {
 }
 
 function createTrayIcon() {
-  const iconPaths = [
-    join(process.resourcesPath, 'iconTemplate.png'),
-    join(process.resourcesPath, 'electron.icns')
+  const iconSources = [
+    { path: join(process.resourcesPath, 'iconTemplate.png'), template: false },
+    { path: join(process.resourcesPath, 'icon.icns'), template: false }
   ]
 
-  for (const iconPath of iconPaths) {
-    const image = nativeImage.createFromPath(iconPath)
+  for (const source of iconSources) {
+    const image = nativeImage.createFromPath(source.path)
     if (!image.isEmpty()) {
       const resized = image.resize({ width: 18, height: 18 })
-      if (process.platform === 'darwin') {
+      if (process.platform === 'darwin' && source.template) {
         resized.setTemplateImage(true)
       }
       return resized
