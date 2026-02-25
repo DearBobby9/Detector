@@ -1,18 +1,41 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { AppSettings, ThemeMode } from '@shared/types'
 
 const SETTINGS_FILE = join(app.getPath('userData'), 'settings.json')
+const LEGACY_SETTINGS_FILES = Array.from(
+  new Set([
+    join(app.getPath('appData'), 'Detector', 'settings.json'),
+    join(app.getPath('appData'), 'detector', 'settings.json')
+  ])
+).filter((candidate) => candidate !== SETTINGS_FILE)
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_MAX_STORAGE_BYTES = 512 * 1024 * 1024
 const MIN_MAX_STORAGE_BYTES = 50 * 1024 * 1024
 const MAX_MAX_STORAGE_BYTES = 5 * 1024 * 1024 * 1024
 const DEFAULT_THEME_MODE: ThemeMode = 'light'
+const DEFAULT_SHOW_DOCK_ICON = false
 
 function normalizeThemeMode(raw: unknown): ThemeMode {
   if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
   return DEFAULT_THEME_MODE
+}
+
+function normalizeBoolean(raw: unknown, fallback: boolean): boolean {
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return fallback
+}
+
+function normalizeOptionalTemplate(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const value = raw.trim()
+  return value.length > 0 ? value : undefined
 }
 
 function getDefaultSettings(): AppSettings {
@@ -34,18 +57,69 @@ function getDefaultSettings(): AppSettings {
       maxStorageFromEnv <= MAX_MAX_STORAGE_BYTES
         ? Math.floor(maxStorageFromEnv)
         : DEFAULT_MAX_STORAGE_BYTES,
-    themeMode: themeModeFromEnv
+    themeMode: themeModeFromEnv,
+    launchAtLogin: false,
+    showDockIcon: DEFAULT_SHOW_DOCK_ICON,
+    shareCrashReports: false,
+    shareAnonymousUsage: false,
+    showTimelineIcons: false,
+    outputLanguageOverride: '',
+    capturePromptTemplate: undefined,
+    chatPromptTemplate: undefined
+  }
+}
+
+function readSettingsFileAt(filePath: string): Partial<AppSettings> | null {
+  if (!existsSync(filePath)) return null
+
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as Partial<AppSettings>
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function ensurePrimarySettingsFile(): void {
+  if (existsSync(SETTINGS_FILE)) return
+
+  for (const legacyFile of LEGACY_SETTINGS_FILES) {
+    const legacy = readSettingsFileAt(legacyFile)
+    if (!legacy) continue
+
+    try {
+      mkdirSync(dirname(SETTINGS_FILE), { recursive: true })
+      writeFileSync(SETTINGS_FILE, JSON.stringify(legacy, null, 2))
+      console.log(`[Settings] Migrated settings file from legacy path: ${legacyFile}`)
+      return
+    } catch {
+      // Try next legacy path.
+    }
   }
 }
 
 function readSettingsFile(): Partial<AppSettings> {
-  if (!existsSync(SETTINGS_FILE)) return {}
+  ensurePrimarySettingsFile()
 
-  try {
-    const parsed = JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8')) as Partial<AppSettings>
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
+  const primary = readSettingsFileAt(SETTINGS_FILE)
+  if (primary) return primary
+
+  for (const legacyFile of LEGACY_SETTINGS_FILES) {
+    const legacy = readSettingsFileAt(legacyFile)
+    if (legacy) return legacy
+  }
+
+  return {}
+}
+
+function syncLegacySettingsCopies(serializedSettings: string): void {
+  for (const legacyFile of LEGACY_SETTINGS_FILES) {
+    if (!existsSync(legacyFile)) continue
+    try {
+      writeFileSync(legacyFile, serializedSettings)
+    } catch {
+      // Keep primary settings write successful even if legacy sync fails.
+    }
   }
 }
 
@@ -76,6 +150,30 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
       ? Math.min(MAX_MAX_STORAGE_BYTES, Math.max(MIN_MAX_STORAGE_BYTES, Math.floor(storageCandidate)))
       : defaults.maxStorageBytes
   const themeMode = normalizeThemeMode((input as Partial<AppSettings> & { themeMode?: unknown }).themeMode)
+  const launchAtLogin = normalizeBoolean((input as Partial<AppSettings> & { launchAtLogin?: unknown }).launchAtLogin, defaults.launchAtLogin)
+  const showDockIcon = normalizeBoolean((input as Partial<AppSettings> & { showDockIcon?: unknown }).showDockIcon, defaults.showDockIcon)
+  const shareCrashReports = normalizeBoolean(
+    (input as Partial<AppSettings> & { shareCrashReports?: unknown }).shareCrashReports,
+    defaults.shareCrashReports
+  )
+  const shareAnonymousUsage = normalizeBoolean(
+    (input as Partial<AppSettings> & { shareAnonymousUsage?: unknown }).shareAnonymousUsage,
+    defaults.shareAnonymousUsage
+  )
+  const showTimelineIcons = normalizeBoolean(
+    (input as Partial<AppSettings> & { showTimelineIcons?: unknown }).showTimelineIcons,
+    defaults.showTimelineIcons
+  )
+  const outputLanguageOverride =
+    typeof input.outputLanguageOverride === 'string'
+      ? input.outputLanguageOverride.trim().slice(0, 64)
+      : defaults.outputLanguageOverride
+  const capturePromptTemplate = normalizeOptionalTemplate(
+    (input as Partial<AppSettings> & { capturePromptTemplate?: unknown }).capturePromptTemplate
+  )
+  const chatPromptTemplate = normalizeOptionalTemplate(
+    (input as Partial<AppSettings> & { chatPromptTemplate?: unknown }).chatPromptTemplate
+  )
 
   return {
     apiBaseUrl,
@@ -83,7 +181,15 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     apiModel,
     apiTimeoutMs,
     maxStorageBytes,
-    themeMode
+    themeMode,
+    launchAtLogin,
+    showDockIcon,
+    shareCrashReports,
+    shareAnonymousUsage,
+    showTimelineIcons,
+    outputLanguageOverride,
+    capturePromptTemplate,
+    chatPromptTemplate
   }
 }
 
@@ -96,6 +202,9 @@ export function saveSettings(input: Partial<AppSettings>): AppSettings {
     ...getSettings(),
     ...input
   })
-  writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2))
+  const serialized = JSON.stringify(merged, null, 2)
+  mkdirSync(dirname(SETTINGS_FILE), { recursive: true })
+  writeFileSync(SETTINGS_FILE, serialized)
+  syncLegacySettingsCopies(serialized)
   return merged
 }

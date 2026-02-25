@@ -3,9 +3,12 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { AnimatePresence, motion } from 'framer-motion'
 import type {
   AppSettings,
+  BrowserSessionInfo,
+  BrowserTabInfo,
   ChatMessage,
   HistoryRecord,
   MemoryItem,
+  SettingsRuntimeStatus,
   ThemeMode,
   StorageCategoryUsage,
   StorageUsageSummary
@@ -19,18 +22,24 @@ import {
   Copy,
   Database,
   ExternalLink,
+  FlaskConical,
   Globe,
   HardDrive,
   LayoutGrid,
+  Languages,
   Loader2,
   Monitor,
   MoreHorizontal,
   PenSquare,
+  Rocket,
   Search,
   Send,
   Settings as SettingsIcon,
+  ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  ToggleLeft,
   X
 } from 'lucide-react'
 
@@ -45,7 +54,7 @@ const SIDEBAR_RESIZER_WIDTH_PX = 14
 const MIN_STORAGE_MB = 50
 const MAX_STORAGE_MB = 5120
 
-type SettingsSection = 'general' | 'provider' | 'storage'
+type SettingsSection = 'general' | 'storage' | 'provider' | 'other'
 
 const FALLBACK_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
@@ -53,8 +62,23 @@ const FALLBACK_SETTINGS: AppSettings = {
   apiModel: 'gpt-4o',
   apiTimeoutMs: 30000,
   maxStorageBytes: 512 * 1024 * 1024,
-  themeMode: 'light'
+  themeMode: 'light',
+  launchAtLogin: false,
+  showDockIcon: false,
+  shareCrashReports: false,
+  shareAnonymousUsage: false,
+  showTimelineIcons: false,
+  outputLanguageOverride: '',
+  capturePromptTemplate: undefined,
+  chatPromptTemplate: undefined
 }
+
+const DEFAULT_CAPTURE_PROMPT_TEMPLATE = `You are a macOS screen understanding assistant.
+Analyze screenshot(s) + active context and return strict JSON in Detector capture-analysis schema.
+Be conservative and only detect emails when evidence is clear.`
+
+const DEFAULT_CHAT_PROMPT_TEMPLATE = `You are a helpful desktop assistant.
+Use screen context to answer follow-up questions with concise, practical guidance.`
 
 const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; label: string; hint: string }> = [
   { value: 'light', label: 'Day', hint: 'Parchment surface with taupe text' },
@@ -68,6 +92,20 @@ function formatTime(ts: number): string {
   } catch {
     return String(ts)
   }
+}
+
+function formatRelativeTime(ts: number | null | undefined): string {
+  if (!ts || !Number.isFinite(ts)) return 'Never checked'
+  const deltaMs = Date.now() - ts
+  if (deltaMs < 15_000) return 'just now'
+  const seconds = Math.max(1, Math.floor(deltaMs / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }
 
 function formatCompactDate(ts: number): string {
@@ -262,6 +300,17 @@ export function MainAppShell() {
   const [isLoadingStorage, setIsLoadingStorage] = useState(false)
   const [isSavingStorageLimit, setIsSavingStorageLimit] = useState(false)
   const [isEnforcingStorageLimit, setIsEnforcingStorageLimit] = useState(false)
+  const [runtimeStatus, setRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null)
+  const [isCheckingRuntimeStatus, setIsCheckingRuntimeStatus] = useState(false)
+  const [isRequestingScreenPermission, setIsRequestingScreenPermission] = useState(false)
+  const [isOpeningScreenSettings, setIsOpeningScreenSettings] = useState(false)
+  const [providerHealth, setProviderHealth] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null)
+  const [providerLastCheckedAt, setProviderLastCheckedAt] = useState<number | null>(null)
+  const [isExportingTimeline, setIsExportingTimeline] = useState(false)
+  const [timelineFromDate, setTimelineFromDate] = useState('')
+  const [timelineToDate, setTimelineToDate] = useState('')
+  const [debugDayInput, setDebugDayInput] = useState('')
+  const [isDebugReprocessing, setIsDebugReprocessing] = useState(false)
   const [storageLimitMbInput, setStorageLimitMbInput] = useState<number>(() =>
     bytesToMb(FALLBACK_SETTINGS.maxStorageBytes)
   )
@@ -593,16 +642,144 @@ export function MainAppShell() {
     }
   }
 
+  const loadRuntimeStatus = async (): Promise<void> => {
+    try {
+      const status = await window.electronAPI.getSettingsStatusCheck()
+      setRuntimeStatus(status)
+    } catch {
+      // non-blocking
+    }
+  }
+
+  const runRuntimeStatusCheck = async (): Promise<void> => {
+    setIsCheckingRuntimeStatus(true)
+    setStatusMessage(null)
+    try {
+      const status = await window.electronAPI.runSettingsStatusCheck()
+      setRuntimeStatus(status)
+      setStatusMessage(`Status check complete (${formatRelativeTime(status.lastCheckedAt)})`)
+    } catch {
+      setStatusMessage('Failed to run status check')
+    } finally {
+      setIsCheckingRuntimeStatus(false)
+    }
+  }
+
+  const requestScreenPermission = async (): Promise<void> => {
+    setIsRequestingScreenPermission(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.requestScreenPermission()
+      setRuntimeStatus((prev) => ({
+        ...(prev || {
+          automationPermission: 'unknown',
+          captureService: 'idle'
+        }),
+        screenPermission: result.status,
+        lastCheckedAt: Date.now()
+      }))
+      setStatusMessage(result.message)
+      void loadRuntimeStatus()
+    } catch {
+      setStatusMessage('Failed to request screen recording permission')
+    } finally {
+      setIsRequestingScreenPermission(false)
+    }
+  }
+
+  const openScreenPermissionSettings = async (): Promise<void> => {
+    setIsOpeningScreenSettings(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.openScreenPermissionSettings()
+      setRuntimeStatus((prev) => ({
+        ...(prev || {
+          automationPermission: 'unknown',
+          captureService: 'idle'
+        }),
+        screenPermission: result.status,
+        lastCheckedAt: Date.now()
+      }))
+      setStatusMessage(result.ok ? 'Opened Screen Recording settings.' : result.message || 'Failed to open settings')
+    } catch {
+      setStatusMessage('Failed to open Screen Recording settings')
+    } finally {
+      setIsOpeningScreenSettings(false)
+    }
+  }
+
+  const toggleSetting = (key: keyof Pick<
+    AppSettings,
+    'launchAtLogin' | 'showDockIcon' | 'shareCrashReports' | 'shareAnonymousUsage' | 'showTimelineIcons'
+  >) => {
+    setSettings((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const resetPromptTemplates = () => {
+    updateSetting('capturePromptTemplate', DEFAULT_CAPTURE_PROMPT_TEMPLATE)
+    updateSetting('chatPromptTemplate', DEFAULT_CHAT_PROMPT_TEMPLATE)
+  }
+
+  const exportTimeline = async (): Promise<void> => {
+    setIsExportingTimeline(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.exportTimelineMarkdown({
+        fromDate: timelineFromDate || undefined,
+        toDate: timelineToDate || undefined
+      })
+      if (result.ok) {
+        setStatusMessage(
+          `Timeline exported (${result.historyCount ?? 0} captures, ${result.memoryCount ?? 0} memory) -> ${result.path}`
+        )
+      } else {
+        setStatusMessage(result.message || 'Timeline export failed')
+      }
+    } catch {
+      setStatusMessage('Timeline export failed')
+    } finally {
+      setIsExportingTimeline(false)
+    }
+  }
+
+  const runDebugReprocess = async (): Promise<void> => {
+    if (!debugDayInput.trim()) {
+      setStatusMessage('Please provide a day in YYYY-MM-DD format')
+      return
+    }
+
+    setIsDebugReprocessing(true)
+    setStatusMessage(null)
+    try {
+      const result = await window.electronAPI.debugReprocessDay({ day: debugDayInput.trim() })
+      setStatusMessage(result.message)
+    } catch {
+      setStatusMessage('Debug reprocess failed')
+    } finally {
+      setIsDebugReprocessing(false)
+    }
+  }
+
   useEffect(() => {
     void refreshMemory()
   }, [])
 
   useEffect(() => {
-    if (route !== 'settings' || settingsSection !== 'storage') return
-    void refreshStorageUsage()
+    if (route !== 'settings') return
+    if (settingsSection === 'storage') {
+      void refreshStorageUsage()
+    }
+    if (settingsSection === 'general') {
+      void loadRuntimeStatus()
+    }
 
     const timer = window.setInterval(() => {
-      void refreshStorageUsage(false, false)
+      if (settingsSection === 'storage') {
+        void refreshStorageUsage(false, false)
+      }
+      if (settingsSection === 'general') {
+        void loadRuntimeStatus()
+      }
     }, 8000)
 
     return () => {
@@ -712,7 +889,15 @@ export function MainAppShell() {
       settings.apiModel !== lastSavedSettings.apiModel ||
       settings.apiTimeoutMs !== lastSavedSettings.apiTimeoutMs ||
       settings.maxStorageBytes !== lastSavedSettings.maxStorageBytes ||
-      settings.themeMode !== lastSavedSettings.themeMode
+      settings.themeMode !== lastSavedSettings.themeMode ||
+      settings.launchAtLogin !== lastSavedSettings.launchAtLogin ||
+      settings.showDockIcon !== lastSavedSettings.showDockIcon ||
+      settings.shareCrashReports !== lastSavedSettings.shareCrashReports ||
+      settings.shareAnonymousUsage !== lastSavedSettings.shareAnonymousUsage ||
+      settings.showTimelineIcons !== lastSavedSettings.showTimelineIcons ||
+      settings.outputLanguageOverride !== lastSavedSettings.outputLanguageOverride ||
+      (settings.capturePromptTemplate || '') !== (lastSavedSettings.capturePromptTemplate || '') ||
+      (settings.chatPromptTemplate || '') !== (lastSavedSettings.chatPromptTemplate || '')
     )
   }, [
     lastSavedSettings.apiBaseUrl,
@@ -721,12 +906,28 @@ export function MainAppShell() {
     lastSavedSettings.apiTimeoutMs,
     lastSavedSettings.maxStorageBytes,
     lastSavedSettings.themeMode,
+    lastSavedSettings.launchAtLogin,
+    lastSavedSettings.showDockIcon,
+    lastSavedSettings.shareCrashReports,
+    lastSavedSettings.shareAnonymousUsage,
+    lastSavedSettings.showTimelineIcons,
+    lastSavedSettings.outputLanguageOverride,
+    lastSavedSettings.capturePromptTemplate,
+    lastSavedSettings.chatPromptTemplate,
     settings.apiBaseUrl,
     settings.apiKey,
     settings.apiModel,
     settings.apiTimeoutMs,
     settings.maxStorageBytes,
-    settings.themeMode
+    settings.themeMode,
+    settings.launchAtLogin,
+    settings.showDockIcon,
+    settings.shareCrashReports,
+    settings.shareAnonymousUsage,
+    settings.showTimelineIcons,
+    settings.outputLanguageOverride,
+    settings.capturePromptTemplate,
+    settings.chatPromptTemplate
   ])
 
   const resolvedThemeMode: Exclude<ThemeMode, 'system'> =
@@ -777,11 +978,55 @@ export function MainAppShell() {
       .map((t: any) => {
         const title = typeof t?.title === 'string' ? t.title.trim() : ''
         const url = typeof t?.url === 'string' ? t.url.trim() : ''
-        return { title, url }
+        const appName = typeof t?.appName === 'string' ? t.appName.trim() : ''
+        const rawWindowIndex = Number(t?.windowIndex)
+        const windowIndex = Number.isFinite(rawWindowIndex) && rawWindowIndex > 0 ? Math.floor(rawWindowIndex) : undefined
+        return { title, url, appName: appName || undefined, windowIndex }
       })
-      .filter((t: { title: string; url: string }) => t.title.length > 0 || t.url.length > 0)
+      .filter((t: BrowserTabInfo) => t.title.length > 0 || t.url.length > 0)
 
-    return { activeApp, windowTitle, activeUrl, tabs, capturedAt }
+    const browserSessionsRaw = Array.isArray(meta?.browserSessions) ? meta.browserSessions : []
+    const browserSessions = browserSessionsRaw
+      .map((sessionRaw: any) => {
+        const appName = typeof sessionRaw?.appName === 'string' ? sessionRaw.appName.trim() : ''
+        if (!appName) return null
+        const sessionTabsRaw = Array.isArray(sessionRaw?.tabs) ? sessionRaw.tabs : []
+        const sessionTabs = sessionTabsRaw
+          .map((tabRaw: any, tabIndex: number) => {
+            const title = typeof tabRaw?.title === 'string' ? tabRaw.title.trim() : ''
+            const url = typeof tabRaw?.url === 'string' ? tabRaw.url.trim() : ''
+            if (!title && !url) return null
+            const rawIndex = Number(tabRaw?.index)
+            const index = Number.isFinite(rawIndex) && rawIndex > 0 ? Math.floor(rawIndex) : tabIndex + 1
+            const tabAppName = typeof tabRaw?.appName === 'string' ? tabRaw.appName.trim() : ''
+            const rawWindowIndex = Number(tabRaw?.windowIndex)
+            const windowIndex =
+              Number.isFinite(rawWindowIndex) && rawWindowIndex > 0 ? Math.floor(rawWindowIndex) : undefined
+            return { index, title, url, appName: tabAppName || appName, windowIndex }
+          })
+          .filter((tab: BrowserTabInfo | null): tab is BrowserTabInfo => Boolean(tab))
+
+        const rawWindowCount = Number(sessionRaw?.windowCount)
+        const windowCount = Number.isFinite(rawWindowCount) && rawWindowCount >= 0 ? Math.floor(rawWindowCount) : 0
+        const activeUrl = typeof sessionRaw?.activeUrl === 'string' ? sessionRaw.activeUrl.trim() : ''
+        const rawActiveTabIndex = Number(sessionRaw?.activeTabIndex)
+        const activeTabIndex =
+          Number.isFinite(rawActiveTabIndex) && rawActiveTabIndex > 0 ? Math.floor(rawActiveTabIndex) : undefined
+
+        if (sessionTabs.length === 0 && windowCount === 0) return null
+        return {
+          appName,
+          tabs: sessionTabs,
+          windowCount,
+          activeUrl: activeUrl || undefined,
+          activeTabIndex
+        } as BrowserSessionInfo
+      })
+      .filter((session: BrowserSessionInfo | null): session is BrowserSessionInfo => Boolean(session))
+
+    const flattenedTabs = tabs.length > 0 ? tabs : browserSessions.flatMap((session) => session.tabs)
+
+    return { activeApp, windowTitle, activeUrl, tabs: flattenedTabs, browserSessions, capturedAt }
   }, [activeRecord, activePayload])
 
   const activeScreenshots = useMemo(() => {
@@ -896,7 +1141,8 @@ export function MainAppShell() {
     selectedScreenshotDataUrl,
     isLoadingScreenshotPreview,
     activeMemoryCandidates.length,
-    activeMetadata?.tabs.length
+    activeMetadata?.tabs.length,
+    activeMetadata?.browserSessions.length
   ])
 
   useEffect(() => {
@@ -923,7 +1169,31 @@ export function MainAppShell() {
     lines.push(`Window: ${activeMetadata.windowTitle}`)
     if (activeMetadata.activeUrl) lines.push(`Active URL: ${activeMetadata.activeUrl}`)
 
-    if (activeMetadata.tabs.length > 0) {
+    if (activeMetadata.browserSessions.length > 0) {
+      lines.push('', `Browser sessions (${activeMetadata.browserSessions.length}):`)
+      activeMetadata.browserSessions.forEach((session, sessionIndex) => {
+        const sessionHeader: string[] = [
+          `${sessionIndex + 1}. ${session.appName || 'Browser'}`,
+          `${session.tabs.length} tabs`
+        ]
+        if (session.windowCount > 0) {
+          sessionHeader.push(`${session.windowCount} windows`)
+        }
+        lines.push(sessionHeader.join(' · '))
+        if (session.activeUrl) {
+          lines.push(`Active URL: ${session.activeUrl}`)
+        }
+        session.tabs.forEach((tab) => {
+          const left = tab.title ? tab.title : '(untitled)'
+          const right = tab.url ? ` — ${tab.url}` : ''
+          lines.push(`- ${left}${right}`)
+        })
+        lines.push('')
+      })
+      if (lines[lines.length - 1] === '') {
+        lines.pop()
+      }
+    } else if (activeMetadata.tabs.length > 0) {
       lines.push('', `Tabs (${activeMetadata.tabs.length}):`)
       for (const t of activeMetadata.tabs) {
         const left = t.title ? t.title : '(untitled)'
@@ -1045,6 +1315,41 @@ export function MainAppShell() {
 
   const storageCategories: StorageCategoryUsage[] = storageUsage?.categories ?? []
 
+  const runtimeScreenPermission = runtimeStatus?.screenPermission ?? 'unknown'
+  const runtimeAutomationPermission = runtimeStatus?.automationPermission ?? 'unknown'
+  const runtimeCaptureService = runtimeStatus?.captureService ?? 'idle'
+  const screenPermissionNeedsRequest =
+    runtimeScreenPermission === 'not-determined' || runtimeScreenPermission === 'unknown'
+  const screenPermissionNeedsSettings =
+    runtimeScreenPermission === 'denied' || runtimeScreenPermission === 'restricted'
+  const providerKeyConfigured = settings.apiKey.trim().length > 0
+  const providerBaseHost = (() => {
+    try {
+      const url = new URL(settings.apiBaseUrl)
+      return url.host || settings.apiBaseUrl
+    } catch {
+      return settings.apiBaseUrl || '—'
+    }
+  })()
+
+  const permissionToneClass = (permission: SettingsRuntimeStatus['screenPermission']) => {
+    if (permission === 'granted') return 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+    if (permission === 'denied' || permission === 'restricted')
+      return 'bg-rose-50 text-rose-700 border-rose-200/70'
+    return 'bg-amber-50 text-amber-700 border-amber-200/70'
+  }
+
+  const permissionLabel = (permission: SettingsRuntimeStatus['screenPermission']) => {
+    if (permission === 'not-determined') return 'not determined'
+    return permission
+  }
+
+  const captureServiceToneClass = (status: SettingsRuntimeStatus['captureService']) => {
+    if (status === 'active') return 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+    if (status === 'error') return 'bg-rose-50 text-rose-700 border-rose-200/70'
+    return 'bg-slate-100 text-slate-600 border-slate-200/70'
+  }
+
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
   }
@@ -1072,9 +1377,13 @@ export function MainAppShell() {
     setStatusMessage(null)
     try {
       const res = await window.electronAPI.apiTest(settings)
+      setProviderHealth(res)
+      setProviderLastCheckedAt(Date.now())
       setStatusMessage(res.ok ? `API test ok (${res.latencyMs}ms)` : `API test failed: ${res.message} (${res.latencyMs}ms)`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      setProviderHealth({ ok: false, message, latencyMs: 0 })
+      setProviderLastCheckedAt(Date.now())
       setStatusMessage(`API test failed: ${message}`)
     } finally {
       setIsTestingApi(false)
@@ -1268,6 +1577,18 @@ export function MainAppShell() {
                 >
                   <HardDrive className="h-4 w-4 text-slate-500" />
                   <span className="flex-1 text-left">Storage</span>
+                </button>
+                <button
+                  className={cn(
+                    'app-nodrag w-full flex items-center gap-3 px-3 py-2 rounded-2xl border transition text-sm',
+                    settingsSection === 'other'
+                      ? 'bg-white/80 border-slate-200/70 shadow-sm text-slate-800'
+                      : 'bg-white/0 border-transparent text-slate-600 hover:bg-white/60 hover:border-slate-200/60'
+                  )}
+                  onClick={() => setSettingsSection('other')}
+                >
+                  <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+                  <span className="flex-1 text-left">Other</span>
                 </button>
               </div>
             </div>
@@ -1518,14 +1839,22 @@ export function MainAppShell() {
                 <div>
                   <div className="text-xs text-slate-400">Settings</div>
                   <div className="text-2xl font-semibold tracking-tight text-slate-800 mt-1">
-                    {settingsSection === 'general' ? 'General' : settingsSection === 'provider' ? 'Providers' : 'Storage'}
+                    {settingsSection === 'general'
+                      ? 'General'
+                      : settingsSection === 'provider'
+                        ? 'Providers'
+                        : settingsSection === 'storage'
+                          ? 'Storage'
+                          : 'Other'}
                   </div>
                   <div className="text-sm text-slate-500 mt-1">
                     {settingsSection === 'general'
-                      ? 'Model and request behavior used by Detector.'
+                      ? 'Runtime status, permissions, and core app preferences.'
                       : settingsSection === 'provider'
-                        ? 'OpenAI-compatible endpoint and API credentials.'
-                        : 'Manage local Detector data usage.'}
+                        ? 'Manage provider config, health checks, and prompt templates.'
+                        : settingsSection === 'storage'
+                          ? 'Track local disk usage and cleanup limits.'
+                          : 'Export, diagnostics, and non-core controls.'}
                   </div>
                 </div>
                 <button
@@ -1550,45 +1879,132 @@ export function MainAppShell() {
                     {settingsSection === 'general' && (
                       <>
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
-                          <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center justify-between gap-4">
                             <div>
-                              <div className="text-lg font-semibold text-slate-800">Tool Model</div>
+                              <div className="text-lg font-semibold text-slate-800">Recording status</div>
                               <div className="text-sm text-slate-500 mt-1">
-                                Model used for chat and screen understanding.
+                                Ensure screen capture and metadata collection are available.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => void runRuntimeStatusCheck()}
+                              disabled={isCheckingRuntimeStatus}
+                              className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                            >
+                              {isCheckingRuntimeStatus ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Checking
+                                </>
+                              ) : (
+                                'Run status check'
+                              )}
+                            </button>
+                          </div>
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Screen recording</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                {runtimeScreenPermission === 'granted' ? (
+                                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                                ) : (
+                                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                                )}
+                                <span
+                                  className={cn(
+                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
+                                    permissionToneClass(runtimeScreenPermission)
+                                  )}
+                                >
+                                  {permissionLabel(runtimeScreenPermission)}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Automation</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                {runtimeAutomationPermission === 'granted' ? (
+                                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                                ) : (
+                                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                                )}
+                                <span
+                                  className={cn(
+                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
+                                    permissionToneClass(runtimeAutomationPermission)
+                                  )}
+                                >
+                                  {permissionLabel(runtimeAutomationPermission)}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Capture service</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
+                                    captureServiceToneClass(runtimeCaptureService)
+                                  )}
+                                >
+                                  {runtimeCaptureService}
+                                </span>
                               </div>
                             </div>
                           </div>
-                          <div className="mt-4">
-                            <input
-                              value={settings.apiModel}
-                              onChange={(e) => updateSetting('apiModel', e.target.value)}
-                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                              placeholder="gpt-4o"
-                            />
+                          <div className="mt-3 text-xs text-slate-500">
+                            Last checked: {formatRelativeTime(runtimeStatus?.lastCheckedAt)}
                           </div>
+                          {(screenPermissionNeedsRequest || screenPermissionNeedsSettings) && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              {screenPermissionNeedsRequest && (
+                                <button
+                                  onClick={() => void requestScreenPermission()}
+                                  disabled={isRequestingScreenPermission}
+                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-3 py-1.5 text-xs font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                >
+                                  {isRequestingScreenPermission ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      Requesting
+                                    </>
+                                  ) : (
+                                    'Request access'
+                                  )}
+                                </button>
+                              )}
+                              {screenPermissionNeedsSettings && (
+                                <button
+                                  onClick={() => void openScreenPermissionSettings()}
+                                  disabled={isOpeningScreenSettings}
+                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                                >
+                                  {isOpeningScreenSettings ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      Opening settings
+                                    </>
+                                  ) : (
+                                    'Open System Settings'
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
-                          <div className="text-lg font-semibold text-slate-800">Request Timeout</div>
-                          <div className="text-sm text-slate-500 mt-1">
-                            Maximum time to wait for API responses.
-                          </div>
-                          <div className="mt-4 max-w-sm">
-                            <input
-                              type="number"
-                              min={1000}
-                              step={1000}
-                              value={settings.apiTimeoutMs}
-                              onChange={(e) => updateSetting('apiTimeoutMs', Number(e.target.value))}
-                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                            />
-                          </div>
+                        <div className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-sm text-slate-600">
+                          Core preferences and language are in <span className="font-semibold">Other</span>. Storage usage and cleanup limits are in <span className="font-semibold">Storage</span>.
                         </div>
+                      </>
+                    )}
 
+                    {settingsSection === 'other' && (
+                      <>
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
                           <div className="text-lg font-semibold text-slate-800">Appearance</div>
                           <div className="text-sm text-slate-500 mt-1">
-                            Neutral Elegance palette. Pick Day, Night, or follow your system appearance.
+                            Keep Detector aligned with your system look and behavior.
                           </div>
                           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
                             {THEME_MODE_OPTIONS.map((option) => {
@@ -1616,41 +2032,380 @@ export function MainAppShell() {
                             Active palette: {resolvedThemeMode === 'dark' ? 'Night' : 'Day'}
                           </div>
                         </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800">App preferences</div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Runtime behavior and privacy controls.
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('launchAtLogin')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Launch at login</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">Start Detector when macOS signs in.</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <ToggleLeft className={cn('h-4 w-4', settings.launchAtLogin ? 'text-[var(--ui-accent)]' : 'text-slate-400')} />
+                                {settings.launchAtLogin ? 'On' : 'Off'}
+                              </span>
+                            </button>
+
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('showDockIcon')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Show Dock icon</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">Off = menu bar only mode.</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <ToggleLeft className={cn('h-4 w-4', settings.showDockIcon ? 'text-[var(--ui-accent)]' : 'text-slate-400')} />
+                                {settings.showDockIcon ? 'On' : 'Off'}
+                              </span>
+                            </button>
+
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('shareCrashReports')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Share crash reports</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">Planned: telemetry pipeline hookup.</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <span className="rounded-full border border-slate-200/70 px-2 py-0.5">Planned</span>
+                                {settings.shareCrashReports ? 'On' : 'Off'}
+                              </span>
+                            </button>
+
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('shareAnonymousUsage')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Share anonymous usage</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">Planned: anonymized product metrics.</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <span className="rounded-full border border-slate-200/70 px-2 py-0.5">Planned</span>
+                                {settings.shareAnonymousUsage ? 'On' : 'Off'}
+                              </span>
+                            </button>
+
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('showTimelineIcons')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Show timeline app/site icons</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">Not enabled in current list view yet.</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <span className="rounded-full border border-slate-200/70 px-2 py-0.5">Not enabled</span>
+                                {settings.showTimelineIcons ? 'On' : 'Off'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                            <Languages className="h-5 w-5 text-slate-500" />
+                            Output language override
+                          </div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Leave empty to follow model default language.
+                          </div>
+                          <div className="mt-4 max-w-md">
+                            <input
+                              value={settings.outputLanguageOverride}
+                              onChange={(e) => updateSetting('outputLanguageOverride', e.target.value)}
+                              placeholder="e.g. English, 中文, 日本語"
+                              className="app-nodrag w-full rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800">Export timeline</div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Export captures + memory to Markdown for a selected date range.
+                          </div>
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">From</span>
+                              <input
+                                type="date"
+                                value={timelineFromDate}
+                                onChange={(e) => setTimelineFromDate(e.target.value)}
+                                className="app-nodrag rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">To</span>
+                              <input
+                                type="date"
+                                value={timelineToDate}
+                                onChange={(e) => setTimelineToDate(e.target.value)}
+                                className="app-nodrag rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                              />
+                            </label>
+                          </div>
+                          <div className="mt-4">
+                            <button
+                              onClick={() => void exportTimeline()}
+                              disabled={isExportingTimeline}
+                              className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-4 py-2 text-sm font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
+                            >
+                              {isExportingTimeline ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Exporting...
+                                </>
+                              ) : (
+                                <>
+                                  <ExternalLink className="h-4 w-4" />
+                                  Export Markdown
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {import.meta.env.DEV && (
+                          <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                            <div className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                              <FlaskConical className="h-5 w-5 text-slate-500" />
+                              Debug: reprocess day
+                            </div>
+                            <div className="text-sm text-slate-500 mt-1">
+                              Development-only hook to re-run day-level processing.
+                            </div>
+                            <div className="mt-4 flex items-center gap-3">
+                              <input
+                                type="date"
+                                value={debugDayInput}
+                                onChange={(e) => setDebugDayInput(e.target.value)}
+                                className="app-nodrag rounded-xl bg-slate-50 border border-slate-200/80 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                              />
+                              <button
+                                onClick={() => void runDebugReprocess()}
+                                disabled={isDebugReprocessing}
+                                className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                              >
+                                {isDebugReprocessing ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Running...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Rocket className="h-4 w-4" />
+                                    Reprocess day
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </>
                     )}
 
                     {settingsSection === 'provider' && (
-                      <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
-                        <div>
-                          <div className="text-lg font-semibold text-slate-800">Provider</div>
+                      <>
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800">Provider overview</div>
                           <div className="text-sm text-slate-500 mt-1">
-                            Configure your OpenAI-compatible endpoint and API key.
+                            Single-provider mode with health checks and prompt controls.
+                          </div>
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Endpoint</div>
+                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">{providerBaseHost}</div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Model</div>
+                              <div className="mt-1 text-sm font-medium text-slate-800 truncate">{settings.apiModel || '—'}</div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">API key</div>
+                              <div className="mt-1 text-sm font-medium text-slate-800">
+                                {providerKeyConfigured ? 'Configured' : 'Missing'}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Connection health</div>
+                              <div
+                                className={cn(
+                                  'mt-1 text-sm font-medium',
+                                  providerHealth ? (providerHealth.ok ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-500'
+                                )}
+                              >
+                                {providerHealth ? (providerHealth.ok ? 'Healthy' : 'Degraded') : 'Not checked'}
+                              </div>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="mt-5 grid grid-cols-1 gap-4">
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-xs text-slate-500">API Base URL</span>
-                            <input
-                              value={settings.apiBaseUrl}
-                              onChange={(e) => updateSetting('apiBaseUrl', e.target.value)}
-                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                              placeholder="https://api.openai.com/v1"
-                            />
-                          </label>
-
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-xs text-slate-500">API Key</span>
-                            <input
-                              type="password"
-                              value={settings.apiKey}
-                              onChange={(e) => updateSetting('apiKey', e.target.value)}
-                              className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
-                              placeholder="sk-..."
-                            />
-                          </label>
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-800">Connection health</div>
+                              <div className="text-sm text-slate-500 mt-1">
+                                Validate API connectivity for current endpoint, model, and key.
+                              </div>
+                            </div>
+                            <button
+                              onClick={testApi}
+                              disabled={isTestingApi || isLoadingSettings}
+                              className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                            >
+                              {isTestingApi ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Testing
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-3.5 w-3.5" />
+                                  Run health check
+                                </>
+                              )}
+                            </button>
+                          </div>
+                          <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium text-slate-800">
+                                {providerHealth
+                                  ? providerHealth.ok
+                                    ? 'Connection healthy'
+                                    : 'Connection issue detected'
+                                  : 'No health check result yet'}
+                              </div>
+                              <span className="text-xs text-slate-500">
+                                Last checked: {formatRelativeTime(providerLastCheckedAt)}
+                              </span>
+                            </div>
+                            {providerHealth && (
+                              <div className="mt-2 text-xs text-slate-500">
+                                {providerHealth.message} · latency {providerHealth.latencyMs} ms
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div>
+                            <div className="text-lg font-semibold text-slate-800">Edit configuration</div>
+                            <div className="text-sm text-slate-500 mt-1">
+                              Configure your OpenAI-compatible endpoint and request defaults.
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid grid-cols-1 gap-4">
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">API Base URL</span>
+                              <input
+                                value={settings.apiBaseUrl}
+                                onChange={(e) => updateSetting('apiBaseUrl', e.target.value)}
+                                className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                placeholder="https://api.openai.com/v1"
+                              />
+                            </label>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <label className="flex flex-col gap-1.5">
+                                <span className="text-xs text-slate-500">Model</span>
+                                <input
+                                  value={settings.apiModel}
+                                  onChange={(e) => updateSetting('apiModel', e.target.value)}
+                                  className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                  placeholder="gpt-4o"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1.5">
+                                <span className="text-xs text-slate-500">Timeout (ms)</span>
+                                <input
+                                  type="number"
+                                  min={5000}
+                                  step={1000}
+                                  value={settings.apiTimeoutMs}
+                                  onChange={(e) => updateSetting('apiTimeoutMs', Number(e.target.value || 0))}
+                                  className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                  placeholder="30000"
+                                />
+                              </label>
+                            </div>
+
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">API Key</span>
+                              <input
+                                type="password"
+                                value={settings.apiKey}
+                                onChange={(e) => updateSetting('apiKey', e.target.value)}
+                                className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)]"
+                                placeholder="sk-..."
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-800">Prompt customization</div>
+                              <div className="text-sm text-slate-500 mt-1">
+                                Customize capture-analysis and chat system prompts.
+                              </div>
+                            </div>
+                            <button
+                              onClick={resetPromptTemplates}
+                              className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                            >
+                              Reset defaults
+                            </button>
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">Capture prompt template</span>
+                              <textarea
+                                value={settings.capturePromptTemplate || ''}
+                                onChange={(e) => updateSetting('capturePromptTemplate', e.target.value)}
+                                rows={4}
+                                className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)] resize-y min-h-[96px]"
+                                placeholder={DEFAULT_CAPTURE_PROMPT_TEMPLATE}
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs text-slate-500">Chat prompt template</span>
+                              <textarea
+                                value={settings.chatPromptTemplate || ''}
+                                onChange={(e) => updateSetting('chatPromptTemplate', e.target.value)}
+                                rows={4}
+                                className="app-nodrag rounded-2xl bg-slate-50 border border-slate-200/80 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--ui-accent-ring)] resize-y min-h-[96px]"
+                                placeholder={DEFAULT_CHAT_PROMPT_TEMPLATE}
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-800">Failover routing</div>
+                              <div className="text-sm text-slate-500 mt-1">
+                                Secondary provider failover is planned in a future phase.
+                              </div>
+                            </div>
+                            <span className="rounded-full border border-slate-200/80 px-3 py-1 text-xs font-medium text-slate-500">
+                              Planned
+                            </span>
+                          </div>
+                        </div>
+                      </>
                     )}
 
                     {settingsSection === 'storage' && (
@@ -1867,13 +2622,15 @@ export function MainAppShell() {
                 <div className="text-sm text-slate-500 truncate">
                   {statusMessage
                     ? statusMessage
-                    : settingsSection === 'storage'
-                      ? 'Storage usage refreshes automatically while this tab is open'
-                      : isSavingSettings
-                        ? 'Saving...'
-                        : isDirty
-                          ? 'Unsaved changes'
-                          : 'All changes saved'}
+                    : settingsSection === 'general'
+                      ? `Last status check: ${formatRelativeTime(runtimeStatus?.lastCheckedAt)}`
+                      : settingsSection === 'provider' && providerLastCheckedAt
+                        ? `Provider health checked ${formatRelativeTime(providerLastCheckedAt)}`
+                        : isSavingSettings
+                          ? 'Saving...'
+                          : isDirty
+                            ? 'Unsaved changes'
+                            : 'All changes saved'}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1883,7 +2640,7 @@ export function MainAppShell() {
                   >
                     Close
                   </button>
-                  {settingsSection !== 'storage' && (
+                  {settingsSection === 'provider' && (
                     <>
                       <button
                         onClick={testApi}
@@ -1902,6 +2659,10 @@ export function MainAppShell() {
                           </>
                         )}
                       </button>
+                    </>
+                  )}
+                  {settingsSection !== 'storage' && (
+                    <>
                       <button
                         onClick={saveSettings}
                         disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
@@ -2046,6 +2807,11 @@ export function MainAppShell() {
                           {activeMetadata && activeMetadata.tabs.length > 0 && (
                             <span className="inline-flex items-center rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600 tabular-nums">
                               {activeMetadata.tabs.length} tabs
+                            </span>
+                          )}
+                          {activeMetadata && activeMetadata.browserSessions.length > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white/80 border border-slate-200/70 px-2.5 py-1 text-[11px] text-slate-600 tabular-nums">
+                              {activeMetadata.browserSessions.length} browser apps
                             </span>
                           )}
                           {activeScreenshots.length > 0 && (
@@ -2293,7 +3059,8 @@ export function MainAppShell() {
                                   )}
                                 </div>
 
-                                {activeMetadata && activeMetadata.tabs.length > 0 && (
+                                {activeMetadata &&
+                                  (activeMetadata.tabs.length > 0 || activeMetadata.browserSessions.length > 0) && (
                                   <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
                                     <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
                                       <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
@@ -2304,17 +3071,58 @@ export function MainAppShell() {
                                       </div>
                                     </div>
                                     <div className="max-h-64 overflow-y-auto">
-                                      {activeMetadata.tabs.map((t, idx) => (
-                                        <div
-                                          key={`${idx}-${t.title}-${t.url}`}
-                                          className="px-4 py-2 border-b border-slate-200/50 last:border-b-0 hover:bg-slate-50/60 transition"
-                                        >
-                                          <div className="text-sm font-medium text-slate-800 truncate">
-                                            {t.title || 'Untitled'}
-                                          </div>
-                                          <div className="text-[11px] text-slate-500 truncate">{t.url}</div>
+                                      {activeMetadata.browserSessions.length > 0 ? (
+                                        <div className="divide-y divide-slate-200/50">
+                                          {activeMetadata.browserSessions.map((session, sessionIdx) => (
+                                            <div key={`${session.appName}-${sessionIdx}`}>
+                                              <div className="px-4 py-2 bg-slate-50/50 border-b border-slate-200/50">
+                                                <div className="text-xs font-medium text-slate-600">
+                                                  {session.appName}
+                                                  <span className="ml-2 tabular-nums text-slate-500">
+                                                    {session.tabs.length} tabs
+                                                    {session.windowCount > 0 ? ` · ${session.windowCount} windows` : ''}
+                                                  </span>
+                                                </div>
+                                                {session.activeUrl && (
+                                                  <div className="text-[11px] text-slate-500 truncate mt-1">
+                                                    Active URL: {session.activeUrl}
+                                                  </div>
+                                                )}
+                                              </div>
+                                              {session.tabs.length === 0 ? (
+                                                <div className="px-4 py-2 text-xs text-slate-500">No tabs found</div>
+                                              ) : (
+                                                session.tabs.map((t, tabIdx) => (
+                                                  <div
+                                                    key={`${sessionIdx}-${tabIdx}-${t.title}-${t.url}`}
+                                                    className="px-4 py-2 border-b border-slate-200/40 last:border-b-0 hover:bg-slate-50/60 transition"
+                                                  >
+                                                    <div className="text-sm font-medium text-slate-800 truncate">
+                                                      {t.title || 'Untitled'}
+                                                    </div>
+                                                    <div className="text-[11px] text-slate-500 truncate">
+                                                      {typeof t.windowIndex === 'number' ? `Window ${t.windowIndex} · ` : ''}
+                                                      {t.url}
+                                                    </div>
+                                                  </div>
+                                                ))
+                                              )}
+                                            </div>
+                                          ))}
                                         </div>
-                                      ))}
+                                      ) : (
+                                        activeMetadata.tabs.map((t, idx) => (
+                                          <div
+                                            key={`${idx}-${t.title}-${t.url}`}
+                                            className="px-4 py-2 border-b border-slate-200/50 last:border-b-0 hover:bg-slate-50/60 transition"
+                                          >
+                                            <div className="text-sm font-medium text-slate-800 truncate">
+                                              {t.title || 'Untitled'}
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 truncate">{t.url}</div>
+                                          </div>
+                                        ))
+                                      )}
                                     </div>
                                   </div>
                                 )}
