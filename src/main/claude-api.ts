@@ -1,4 +1,4 @@
-import { ActiveWindowInfo, DetectionResult, ScreenCapture } from '@shared/types'
+import { ActiveWindowInfo, BrowserSessionInfo, BrowserTabInfo, DetectionResult, ScreenCapture } from '@shared/types'
 import { getSettings } from './settings'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -16,7 +16,14 @@ function normalizeConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function parseDetectionResult(text: string): DetectionResult {
+function normalizeErrorSnippet(text: string, maxLength = 220): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (!compact) return '(empty response)'
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+export function parseDetectionResult(text: string): DetectionResult {
   // Parse JSON from response (handle potential markdown code blocks)
   let jsonStr = text.trim()
   const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -28,7 +35,7 @@ function parseDetectionResult(text: string): DetectionResult {
   try {
     parsed = JSON.parse(jsonStr)
   } catch {
-    throw new Error('Model response was not valid JSON')
+    throw new Error(`Model response was not valid JSON. Raw response: ${normalizeErrorSnippet(text)}`)
   }
 
   if (!isRecord(parsed)) {
@@ -154,6 +161,14 @@ function isAbortError(error: unknown): boolean {
   )
 }
 
+function toTabLine(tab: BrowserTabInfo): string {
+  const index = Number.isFinite(Number(tab.index)) && Number(tab.index) > 0 ? Math.floor(Number(tab.index)) : 0
+  const title = typeof tab.title === 'string' && tab.title.trim().length > 0 ? tab.title.trim() : '(untitled)'
+  const url = typeof tab.url === 'string' ? tab.url.trim() : ''
+  const prefix = index > 0 ? `${index}. ` : '- '
+  return url ? `${prefix}${title} — ${url}` : `${prefix}${title}`
+}
+
 function buildActiveContextText(activeWindow: ActiveWindowInfo): string {
   const lines: string[] = []
   const appName = typeof activeWindow.appName === 'string' && activeWindow.appName.trim()
@@ -161,6 +176,9 @@ function buildActiveContextText(activeWindow: ActiveWindowInfo): string {
     : 'Unknown'
   const windowTitle = typeof activeWindow.windowTitle === 'string' ? activeWindow.windowTitle.trim() : ''
   const activeUrl = typeof activeWindow.url === 'string' ? activeWindow.url.trim() : ''
+  const browserSessions = Array.isArray(activeWindow.browserSessions)
+    ? (activeWindow.browserSessions as BrowserSessionInfo[])
+    : []
   const browserTabs = Array.isArray(activeWindow.browserTabs) ? activeWindow.browserTabs : []
 
   lines.push(`Active application: ${appName}`)
@@ -169,15 +187,35 @@ function buildActiveContextText(activeWindow: ActiveWindowInfo): string {
     lines.push(`Active URL: ${activeUrl}`)
   }
 
-  if (browserTabs.length > 0) {
+  if (browserSessions.length > 0) {
+    lines.push('')
+    lines.push(`Browser sessions (${browserSessions.length}):`)
+    browserSessions.forEach((session, index) => {
+      const sessionAppName =
+        typeof session.appName === 'string' && session.appName.trim().length > 0 ? session.appName.trim() : 'Browser'
+      const sessionTabs = Array.isArray(session.tabs) ? session.tabs : []
+      const sessionWindowCount = Number(session.windowCount)
+      const windows = Number.isFinite(sessionWindowCount) && sessionWindowCount >= 0 ? Math.floor(sessionWindowCount) : 0
+      const sessionActiveUrl = typeof session.activeUrl === 'string' ? session.activeUrl.trim() : ''
+      const headerParts = [`Session ${index + 1} (${sessionAppName})`, `${sessionTabs.length} tabs`]
+      if (windows > 0) headerParts.push(`${windows} windows`)
+      lines.push(headerParts.join(' · '))
+      if (sessionActiveUrl) {
+        lines.push(`Active URL: ${sessionActiveUrl}`)
+      }
+      for (const tab of sessionTabs) {
+        lines.push(toTabLine(tab))
+      }
+      lines.push('')
+    })
+    if (lines[lines.length - 1] === '') {
+      lines.pop()
+    }
+  } else if (browserTabs.length > 0) {
     lines.push('')
     lines.push(`Browser tabs (${browserTabs.length}):`)
     for (const tab of browserTabs) {
-      const index = Number.isFinite(Number(tab.index)) && Number(tab.index) > 0 ? Math.floor(Number(tab.index)) : 0
-      const title = typeof tab.title === 'string' && tab.title.trim().length > 0 ? tab.title.trim() : '(untitled)'
-      const url = typeof tab.url === 'string' ? tab.url.trim() : ''
-      const prefix = index > 0 ? `${index}. ` : '- '
-      lines.push(url ? `${prefix}${title} — ${url}` : `${prefix}${title}`)
+      lines.push(toTabLine(tab))
     }
   }
 
@@ -230,6 +268,18 @@ Rules:
 - memoryCandidates must be 0-6 items and must be actionable.
 - dueAt must be an ISO 8601 string if provided, otherwise null.
 `
+
+function buildCaptureSystemPrompt(settings: { capturePromptTemplate?: string; outputLanguageOverride?: string }): string {
+  const basePrompt =
+    typeof settings.capturePromptTemplate === 'string' && settings.capturePromptTemplate.trim().length > 0
+      ? settings.capturePromptTemplate.trim()
+      : SYSTEM_PROMPT
+  const languageOverride =
+    typeof settings.outputLanguageOverride === 'string' ? settings.outputLanguageOverride.trim() : ''
+
+  if (!languageOverride) return basePrompt
+  return `${basePrompt}\n\nAdditional output rule: Use ${languageOverride} for all generated text fields unless source text must remain verbatim.`
+}
 
 export async function callClaude(
   screenshots: ScreenCapture[],
@@ -285,7 +335,7 @@ export async function callClaude(
         model,
         max_tokens: 1024,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: buildCaptureSystemPrompt(settings) },
           { role: 'user', content: userContent }
         ]
       }),

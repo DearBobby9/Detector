@@ -3,6 +3,7 @@ export interface ActiveWindowInfo {
   windowTitle: string
   url?: string
   browserTabs?: BrowserTabInfo[]
+  browserSessions?: BrowserSessionInfo[]
   activeTabIndex?: number
 }
 
@@ -10,6 +11,16 @@ export interface BrowserTabInfo {
   index: number
   title: string
   url: string
+  appName?: string
+  windowIndex?: number
+}
+
+export interface BrowserSessionInfo {
+  appName: string
+  tabs: BrowserTabInfo[]
+  windowCount: number
+  activeUrl?: string
+  activeTabIndex?: number
 }
 
 export interface CaptureMetadata {
@@ -18,6 +29,7 @@ export interface CaptureMetadata {
   activeUrl?: string
   capturedAt: number
   tabs: BrowserTabInfo[]
+  browserSessions?: BrowserSessionInfo[]
   activeTabIndex?: number
 }
 
@@ -154,6 +166,31 @@ export interface HistoryRecord {
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+export type PermissionStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'
+
+export type CaptureServiceStatus = 'active' | 'idle' | 'error'
+
+export interface SettingsRuntimeStatus {
+  screenPermission: PermissionStatus
+  automationPermission: PermissionStatus
+  captureService: CaptureServiceStatus
+  lastCheckedAt: number
+}
+
+export interface ScreenPermissionRequestResult {
+  ok: boolean
+  status: PermissionStatus
+  prompted: boolean
+  message: string
+}
+
+export interface ScreenPermissionSettingsResult {
+  ok: boolean
+  status: PermissionStatus
+  url: string
+  message?: string
+}
+
 export interface AppSettings {
   apiBaseUrl: string
   apiKey: string
@@ -161,6 +198,14 @@ export interface AppSettings {
   apiTimeoutMs: number
   maxStorageBytes: number
   themeMode: ThemeMode
+  launchAtLogin: boolean
+  showDockIcon: boolean
+  shareCrashReports: boolean
+  shareAnonymousUsage: boolean
+  showTimelineIcons: boolean
+  outputLanguageOverride: string
+  capturePromptTemplate?: string
+  chatPromptTemplate?: string
 }
 
 export type ChatRole = 'user' | 'assistant'

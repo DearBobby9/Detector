@@ -1,5 +1,6 @@
 import { AppSettings, ChatMessage } from '@shared/types'
 import { getSettings } from './settings'
+import { parseDetectionResult } from './claude-api'
 
 const SYSTEM_CHAT_PROMPT = `You are a helpful desktop assistant.
 
@@ -29,7 +30,30 @@ function mergeSettings(override?: Partial<AppSettings>): AppSettings {
     apiBaseUrl: typeof override.apiBaseUrl === 'string' ? override.apiBaseUrl : current.apiBaseUrl,
     apiKey: typeof override.apiKey === 'string' ? override.apiKey : current.apiKey,
     apiModel: typeof override.apiModel === 'string' ? override.apiModel : current.apiModel,
-    apiTimeoutMs: typeof override.apiTimeoutMs === 'number' ? override.apiTimeoutMs : current.apiTimeoutMs
+    apiTimeoutMs: typeof override.apiTimeoutMs === 'number' ? override.apiTimeoutMs : current.apiTimeoutMs,
+    maxStorageBytes:
+      typeof override.maxStorageBytes === 'number' ? override.maxStorageBytes : current.maxStorageBytes,
+    themeMode: override.themeMode || current.themeMode,
+    launchAtLogin: typeof override.launchAtLogin === 'boolean' ? override.launchAtLogin : current.launchAtLogin,
+    showDockIcon: typeof override.showDockIcon === 'boolean' ? override.showDockIcon : current.showDockIcon,
+    shareCrashReports:
+      typeof override.shareCrashReports === 'boolean' ? override.shareCrashReports : current.shareCrashReports,
+    shareAnonymousUsage:
+      typeof override.shareAnonymousUsage === 'boolean'
+        ? override.shareAnonymousUsage
+        : current.shareAnonymousUsage,
+    showTimelineIcons:
+      typeof override.showTimelineIcons === 'boolean' ? override.showTimelineIcons : current.showTimelineIcons,
+    outputLanguageOverride:
+      typeof override.outputLanguageOverride === 'string'
+        ? override.outputLanguageOverride
+        : current.outputLanguageOverride,
+    capturePromptTemplate:
+      typeof override.capturePromptTemplate === 'string'
+        ? override.capturePromptTemplate
+        : current.capturePromptTemplate,
+    chatPromptTemplate:
+      typeof override.chatPromptTemplate === 'string' ? override.chatPromptTemplate : current.chatPromptTemplate
   }
 }
 
@@ -92,15 +116,54 @@ export async function apiTest(override?: Partial<AppSettings>): Promise<{ ok: bo
 
   const start = Date.now()
   try {
-    await postChatCompletions(
+    const ping = await postChatCompletions(
       settings,
       [
-        { role: 'system', content: 'Return ONLY the single word OK.' },
+        { role: 'system', content: 'Return ONLY this exact text: OK' },
         { role: 'user', content: 'OK' }
       ],
       8
     )
-    return { ok: true, message: 'API test succeeded', latencyMs: Date.now() - start }
+    if (ping !== 'OK') {
+      return {
+        ok: false,
+        message: `API test failed strict ping check. Expected "OK", got "${ping.slice(0, 32)}".`,
+        latencyMs: Date.now() - start
+      }
+    }
+
+    const captureSmoke = await postChatCompletions(
+      settings,
+      [
+        {
+          role: 'system',
+          content:
+            'Return ONLY valid JSON for Detector capture-analysis schema. No markdown, no extra text.'
+        },
+        {
+          role: 'user',
+          content: `Return exactly one object with this shape:
+{
+  "type": "capture-analysis",
+  "screenTitle": "API smoke test",
+  "email": { "detected": false, "confidence": 0, "evidence": [] },
+  "memoryCandidates": []
+}`
+        }
+      ],
+      220
+    )
+
+    const parsed = parseDetectionResult(captureSmoke)
+    if (parsed.type !== 'capture-analysis') {
+      return {
+        ok: false,
+        message: `API test failed capture schema check. Expected "capture-analysis", got "${parsed.type}".`,
+        latencyMs: Date.now() - start
+      }
+    }
+
+    return { ok: true, message: 'API test succeeded (strict ping + capture JSON schema)', latencyMs: Date.now() - start }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return { ok: false, message, latencyMs: Date.now() - start }
@@ -118,10 +181,20 @@ export async function sendChat(
     throw new Error('API key not set')
   }
 
-  const apiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: SYSTEM_CHAT_PROMPT },
-    { role: 'system', content: `Screen context:\n${contextText}` }
-  ]
+  const apiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+  const systemPrompt =
+    typeof settings.chatPromptTemplate === 'string' && settings.chatPromptTemplate.trim().length > 0
+      ? settings.chatPromptTemplate.trim()
+      : SYSTEM_CHAT_PROMPT
+
+  apiMessages.push({ role: 'system', content: systemPrompt })
+  if (typeof settings.outputLanguageOverride === 'string' && settings.outputLanguageOverride.trim().length > 0) {
+    apiMessages.push({
+      role: 'system',
+      content: `Always reply in ${settings.outputLanguageOverride.trim()}.`
+    })
+  }
+  apiMessages.push({ role: 'system', content: `Screen context:\n${contextText}` })
 
   for (const msg of messages) {
     apiMessages.push({ role: msg.role, content: msg.content })
@@ -129,4 +202,3 @@ export async function sendChat(
 
   return postChatCompletions(settings, apiMessages, 800)
 }
-

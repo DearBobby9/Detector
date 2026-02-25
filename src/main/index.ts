@@ -2,10 +2,16 @@ import { app } from 'electron'
 import { config } from 'dotenv'
 import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
-import type { ActiveWindowInfo, BrowserTabInfo, CaptureMetadata } from '@shared/types'
+import type {
+  ActiveWindowInfo,
+  BrowserSessionInfo,
+  BrowserTabInfo,
+  CaptureMetadata,
+  CaptureServiceStatus
+} from '@shared/types'
 import { createPanelWindow, getPanelWindow, resizePanel, showPanel } from './panel-window'
 import { registerIpcHandlers } from './ipc-handlers'
-import { registerHotkey, unregisterHotkey } from './hotkey'
+import { isHotkeyRegistered, registerHotkey, unregisterHotkey } from './hotkey'
 import { captureAllScreens } from './screenshot'
 import { getActiveWindow } from './active-window'
 import { callClaude } from './claude-api'
@@ -14,11 +20,21 @@ import { createAppWindow, getAppWindow, showAppWindow } from './app-window'
 import { createTray } from './tray'
 import { enforceStorageLimit } from './storage'
 import { persistCaptureScreenshots } from './capture-storage'
+import { getSettings } from './settings'
+import { applyRuntimeSettings } from './runtime-preferences'
 
 // Load .env from project root
 config({ path: join(__dirname, '../../.env') })
 
 let isProcessing = false
+
+function getCaptureServiceStatus(): CaptureServiceStatus {
+  if (isProcessing) return 'active'
+  const panel = getPanelWindow()
+  if (!panel || panel.isDestroyed()) return 'error'
+  if (!isHotkeyRegistered()) return 'error'
+  return 'idle'
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -43,9 +59,31 @@ function sanitizeBrowserTabs(rawTabs: BrowserTabInfo[] | undefined): BrowserTabI
       if (!title && !url) return null
       const maybeIndex = Number((tab as BrowserTabInfo).index)
       const index = Number.isFinite(maybeIndex) && maybeIndex > 0 ? Math.floor(maybeIndex) : idx + 1
-      return { index, title, url }
+      const appName = typeof tab?.appName === 'string' ? tab.appName.trim() : ''
+      const rawWindowIndex = Number((tab as BrowserTabInfo).windowIndex)
+      const windowIndex = Number.isFinite(rawWindowIndex) && rawWindowIndex > 0 ? Math.floor(rawWindowIndex) : undefined
+      return { index, title, url, appName: appName || undefined, windowIndex }
     })
     .filter((tab): tab is BrowserTabInfo => Boolean(tab))
+}
+
+function sanitizeBrowserSessions(rawSessions: BrowserSessionInfo[] | undefined): BrowserSessionInfo[] {
+  if (!Array.isArray(rawSessions)) return []
+  return rawSessions
+    .map((session) => {
+      const appName = typeof session?.appName === 'string' ? session.appName.trim() : ''
+      if (!appName) return null
+      const tabs = sanitizeBrowserTabs(session.tabs)
+      const rawWindowCount = Number(session.windowCount)
+      const windowCount = Number.isFinite(rawWindowCount) && rawWindowCount >= 0 ? Math.floor(rawWindowCount) : 0
+      const activeUrl = typeof session.activeUrl === 'string' ? session.activeUrl.trim() : ''
+      const rawActiveTabIndex = Number(session.activeTabIndex)
+      const activeTabIndex =
+        Number.isFinite(rawActiveTabIndex) && rawActiveTabIndex > 0 ? Math.floor(rawActiveTabIndex) : undefined
+      if (tabs.length === 0 && windowCount === 0) return null
+      return { appName, tabs, windowCount, activeUrl: activeUrl || undefined, activeTabIndex }
+    })
+    .filter((session): session is BrowserSessionInfo => Boolean(session))
 }
 
 function buildCaptureMetadata(activeWindow: ActiveWindowInfo, capturedAt: number): CaptureMetadata {
@@ -57,10 +95,18 @@ function buildCaptureMetadata(activeWindow: ActiveWindowInfo, capturedAt: number
     typeof activeWindow.url === 'string' && activeWindow.url.trim().length > 0
       ? activeWindow.url.trim()
       : undefined
-  const tabs = sanitizeBrowserTabs(activeWindow.browserTabs)
+  const browserSessions = sanitizeBrowserSessions(activeWindow.browserSessions)
+  const tabsFromPayload = sanitizeBrowserTabs(activeWindow.browserTabs)
+  const tabs = tabsFromPayload.length > 0 ? tabsFromPayload : browserSessions.flatMap((session) => session.tabs)
   const rawActiveTabIndex = Number(activeWindow.activeTabIndex)
-  const activeTabIndex =
+  let activeTabIndex =
     Number.isFinite(rawActiveTabIndex) && rawActiveTabIndex > 0 ? Math.floor(rawActiveTabIndex) : undefined
+  if (typeof activeTabIndex !== 'number') {
+    const sessionForActiveApp = browserSessions.find((session) => session.appName === activeApp)
+    if (typeof sessionForActiveApp?.activeTabIndex === 'number') {
+      activeTabIndex = sessionForActiveApp.activeTabIndex
+    }
+  }
 
   return {
     activeApp,
@@ -68,6 +114,7 @@ function buildCaptureMetadata(activeWindow: ActiveWindowInfo, capturedAt: number
     activeUrl,
     capturedAt,
     tabs,
+    browserSessions: browserSessions.length > 0 ? browserSessions : undefined,
     activeTabIndex
   }
 }
@@ -88,6 +135,10 @@ async function orchestrateCapture(): Promise<void> {
   }
 
   try {
+    if (panel.isVisible()) {
+      console.log('[Main] refreshing existing panel with new capture')
+    }
+
     // Show loading state immediately
     showPanel('collapsed')
     broadcastToRenderers(IPC.PANEL_SHOW_LOADING)
@@ -172,8 +223,9 @@ async function orchestrateCapture(): Promise<void> {
       result.metadata = buildCaptureMetadata(activeWindow, capturedAt)
     }
 
-    // Send result to renderer
-    resizePanel('expanded')
+    // Keep the panel in slim mode after analysis completes.
+    // The renderer expands on hover for low-intrusion interaction.
+    resizePanel('collapsed')
     broadcastToRenderers(IPC.PANEL_SHOW_RESULT, result)
 
     // Save to history
@@ -288,14 +340,13 @@ function formatResultText(result: { type: string } & Record<string, unknown>): s
 app.whenReady().then(() => {
   console.log('[Main] App ready')
 
-  // Keep dock visible in development so macOS permission prompts are less likely to be missed.
-  if (app.isPackaged) {
-    app.dock?.hide()
-  }
+  // Apply runtime switches (dock visibility, launch-at-login) from saved settings.
+  applyRuntimeSettings(getSettings())
 
   // Register IPC handlers
   registerIpcHandlers({
-    triggerCapture: orchestrateCapture
+    triggerCapture: orchestrateCapture,
+    getCaptureServiceStatus
   })
 
   // Create the panel window (hidden, pre-loaded)
