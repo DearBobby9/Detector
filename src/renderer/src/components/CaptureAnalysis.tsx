@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BookmarkPlus, Check, ChevronDown, Copy, Mail, X } from 'lucide-react'
+import { Bell, BookmarkPlus, Check, ChevronDown, Copy, Mail, X } from 'lucide-react'
 import type { CaptureAnalysisResult, MemoryCandidate } from '@shared/types'
+import type { AgentAction } from '@shared/agent-types'
+import { useAgentAction } from '@/hooks/useAgentAction'
+import { ActionReviewCard } from './ActionReviewCard'
+
+const ACTIONABLE_KINDS = new Set(['reminder', 'event', 'todo'])
 
 interface Props {
   data: CaptureAnalysisResult
   onCopy: (text: string) => void
   onDetailViewChange?: (isOpen: boolean) => void
   detailCloseSignal?: number
+  agentEnabled?: boolean
 }
 
 function formatCandidateForCopy(c: MemoryCandidate): string {
@@ -23,7 +29,20 @@ function parseLineList(details: string): string[] {
     .filter(Boolean)
 }
 
-export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseSignal }: Props) {
+export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseSignal, agentEnabled }: Props) {
+  const agentAction = useAgentAction()
+
+  const createAgentAction = (candidate: MemoryCandidate): void => {
+    const action: AgentAction = {
+      id: crypto.randomUUID(),
+      type: 'create_reminder',
+      title: candidate.title,
+      notes: candidate.details || undefined,
+      dueAt: typeof candidate.dueAt === 'string' ? candidate.dueAt : undefined,
+      listName: 'Reminders'
+    }
+    agentAction.startFromAction(action)
+  }
   const [savingIndex, setSavingIndex] = useState<number | null>(null)
   const [savedIndexes, setSavedIndexes] = useState<Set<number>>(() => new Set())
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -454,6 +473,19 @@ export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseS
                       </div>
 
                       <div className="shrink-0 flex items-center gap-1">
+                        {agentEnabled && ACTIONABLE_KINDS.has(c.kind) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              createAgentAction(c)
+                            }}
+                            className="p-2 rounded-md hover:bg-white/10 transition-colors"
+                            aria-label="Create Reminder"
+                            title="Create Reminder"
+                          >
+                            <Bell className="h-4 w-4 text-blue-400" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -525,6 +557,19 @@ export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseS
                       </div>
 
                       <div className="shrink-0 flex items-center gap-1">
+                        {agentEnabled && ACTIONABLE_KINDS.has(c.kind) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              createAgentAction(c)
+                            }}
+                            className="p-2 rounded-md hover:bg-white/10 transition-colors"
+                            aria-label="Create Reminder"
+                            title="Create Reminder"
+                          >
+                            <Bell className="h-4 w-4 text-blue-400" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -557,6 +602,41 @@ export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseS
                   )
                 })}
             </div>
+          )}
+
+          {/* Agent action review card (capture path) */}
+          {agentAction.pendingAction && agentAction.pendingAction.action && (
+            <ActionReviewCard
+              action={agentAction.pendingAction.action}
+              requestId={agentAction.pendingAction.requestId}
+              stage={agentAction.pendingAction.stage}
+              validation={agentAction.pendingAction.validation}
+              result={agentAction.pendingAction.result}
+              error={agentAction.pendingAction.error}
+              onConfirm={() =>
+                agentAction.confirm(
+                  agentAction.pendingAction!.requestId,
+                  agentAction.pendingAction!.actionId
+                )
+              }
+              onCancel={() =>
+                agentAction.cancel(
+                  agentAction.pendingAction!.requestId,
+                  agentAction.pendingAction!.actionId
+                )
+              }
+            />
+          )}
+          {agentAction.result && agentAction.result.action && (
+            <ActionReviewCard
+              action={agentAction.result.action}
+              requestId={agentAction.result.requestId}
+              stage={agentAction.result.stage}
+              result={agentAction.result.result}
+              error={agentAction.result.error}
+              onConfirm={() => {}}
+              onCancel={() => {}}
+            />
           )}
 
           {saveError && <div className="mt-2 text-xs text-destructive">{saveError}</div>}

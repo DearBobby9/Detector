@@ -18,6 +18,7 @@ const COLLAPSE_DELAY_MS = 240
 type OverlayMode = 'collapsed' | 'expanded' | 'detail'
 
 export function Panel({ state, onDismiss, onCopy }: Props) {
+  const [agentEnabled, setAgentEnabled] = useState(false)
   const isVisible = state.status !== 'hidden'
   const canExpand = state.status === 'result' || state.status === 'error'
   const isLoading = state.status === 'loading'
@@ -115,6 +116,12 @@ export function Panel({ state, onDismiss, onCopy }: Props) {
       clearCollapseTimer()
     }
   }, [clearCollapseTimer])
+
+  // Load agent setting when panel becomes visible
+  useEffect(() => {
+    if (!isVisible) return
+    void window.electronAPI.getSettings().then((s) => setAgentEnabled(s.agentExecutionEnabled)).catch(() => {})
+  }, [isVisible])
 
   const onDetailViewChange = useCallback(
     (isOpen: boolean) => {
@@ -219,6 +226,7 @@ export function Panel({ state, onDismiss, onCopy }: Props) {
                       onCopy={onCopy}
                       onDetailViewChange={onDetailViewChange}
                       detailCloseSignal={detailCloseSignal}
+                      agentEnabled={agentEnabled}
                     />
                   )}
 
