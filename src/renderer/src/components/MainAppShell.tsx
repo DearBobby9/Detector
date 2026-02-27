@@ -15,6 +15,9 @@ import type {
   StorageUsageSummary
 } from '@shared/types'
 import { cn } from '@/lib/utils'
+import { parseActionTags } from '@/lib/parseActionTags'
+import { useAgentAction } from '@/hooks/useAgentAction'
+import { ActionReviewCard } from './ActionReviewCard'
 import {
   Bookmark,
   ChevronDown,
@@ -38,9 +41,11 @@ import {
   Settings as SettingsIcon,
   ShieldAlert,
   ShieldCheck,
+  CircleCheck,
   SlidersHorizontal,
   Sparkles,
   ToggleLeft,
+  ToggleRight,
   X
 } from 'lucide-react'
 
@@ -55,7 +60,7 @@ const SIDEBAR_RESIZER_WIDTH_PX = 14
 const MIN_STORAGE_MB = 50
 const MAX_STORAGE_MB = 5120
 
-type SettingsSection = 'general' | 'storage' | 'provider' | 'other'
+type SettingsSection = 'general' | 'storage' | 'provider' | 'agent' | 'other'
 
 const FALLBACK_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
@@ -73,6 +78,7 @@ const FALLBACK_SETTINGS: AppSettings = {
   shareCrashReports: false,
   shareAnonymousUsage: false,
   showTimelineIcons: false,
+  agentExecutionEnabled: false,
   outputLanguageOverride: '',
   capturePromptTemplate: undefined,
   chatPromptTemplate: undefined
@@ -298,6 +304,8 @@ export function MainAppShell() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const demoMode = urlParams.get('demo') === '1'
 
+  const agentAction = useAgentAction()
+
   const [route, setRoute] = useState<Route>('home')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
 
@@ -328,7 +336,7 @@ export function MainAppShell() {
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [activeRecordId, setActiveRecordId] = useState<number | null>(null)
-  const [isCapturing, setIsCapturing] = useState(false)
+  const [, setIsCapturing] = useState(false)
 
   const [memory, setMemory] = useState<MemoryItem[]>([])
   const [isLoadingMemory, setIsLoadingMemory] = useState(true)
@@ -344,6 +352,8 @@ export function MainAppShell() {
   const [expandedModalCandidateMap, setExpandedModalCandidateMap] = useState<Record<string, boolean>>({})
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [statusMessageType, setStatusMessageType] = useState<'success' | 'error' | 'info'>('info')
+  const [agentPermissionResult, setAgentPermissionResult] = useState<'granted' | 'denied' | 'unknown' | null>(null)
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -692,8 +702,10 @@ export function MainAppShell() {
       const status = await window.electronAPI.runSettingsStatusCheck()
       setRuntimeStatus(status)
       setStatusMessage(`Status check complete (${formatRelativeTime(status.lastCheckedAt)})`)
+      setStatusMessageType('success')
     } catch {
       setStatusMessage('Failed to run status check')
+      setStatusMessageType('error')
     } finally {
       setIsCheckingRuntimeStatus(false)
     }
@@ -744,7 +756,7 @@ export function MainAppShell() {
 
   const toggleSetting = (key: keyof Pick<
     AppSettings,
-    'launchAtLogin' | 'showDockIcon' | 'shareCrashReports' | 'shareAnonymousUsage' | 'showTimelineIcons'
+    'launchAtLogin' | 'showDockIcon' | 'shareCrashReports' | 'shareAnonymousUsage' | 'showTimelineIcons' | 'agentExecutionEnabled'
   >) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }))
   }
@@ -940,6 +952,7 @@ export function MainAppShell() {
       settings.shareCrashReports !== lastSavedSettings.shareCrashReports ||
       settings.shareAnonymousUsage !== lastSavedSettings.shareAnonymousUsage ||
       settings.showTimelineIcons !== lastSavedSettings.showTimelineIcons ||
+      settings.agentExecutionEnabled !== lastSavedSettings.agentExecutionEnabled ||
       settings.outputLanguageOverride !== lastSavedSettings.outputLanguageOverride ||
       (settings.capturePromptTemplate || '') !== (lastSavedSettings.capturePromptTemplate || '') ||
       (settings.chatPromptTemplate || '') !== (lastSavedSettings.chatPromptTemplate || '')
@@ -960,6 +973,7 @@ export function MainAppShell() {
     lastSavedSettings.shareCrashReports,
     lastSavedSettings.shareAnonymousUsage,
     lastSavedSettings.showTimelineIcons,
+    lastSavedSettings.agentExecutionEnabled,
     lastSavedSettings.outputLanguageOverride,
     lastSavedSettings.capturePromptTemplate,
     lastSavedSettings.chatPromptTemplate,
@@ -978,6 +992,7 @@ export function MainAppShell() {
     settings.shareCrashReports,
     settings.shareAnonymousUsage,
     settings.showTimelineIcons,
+    settings.agentExecutionEnabled,
     settings.outputLanguageOverride,
     settings.capturePromptTemplate,
     settings.chatPromptTemplate
@@ -1427,8 +1442,10 @@ export function MainAppShell() {
       setSettings(saved)
       setLastSavedSettings(saved)
       setStatusMessage('All changes saved')
+      setStatusMessageType('success')
     } catch {
       setStatusMessage('Failed to save settings')
+      setStatusMessageType('error')
     } finally {
       setIsSavingSettings(false)
     }
@@ -1446,24 +1463,15 @@ export function MainAppShell() {
           ? `${providerDisplayName} test ok (${res.latencyMs}ms)`
           : `${providerDisplayName} test failed: ${res.message} (${res.latencyMs}ms)`
       )
+      setStatusMessageType(res.ok ? 'success' : 'error')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setProviderHealth({ ok: false, message, latencyMs: 0 })
       setProviderLastCheckedAt(Date.now())
       setStatusMessage(`${providerDisplayName} test failed: ${message}`)
+      setStatusMessageType('error')
     } finally {
       setIsTestingApi(false)
-    }
-  }
-
-  const triggerCapture = async () => {
-    setIsCapturing(true)
-    setStatusMessage(null)
-    try {
-      await window.electronAPI.triggerCapture()
-    } catch {
-      setIsCapturing(false)
-      setStatusMessage('Failed to trigger capture')
     }
   }
 
@@ -1515,7 +1523,14 @@ export function MainAppShell() {
 
     try {
       const res = await window.electronAPI.chatSend({ contextText, messages: nextMessages })
-      setChatMessages([...nextMessages, { role: 'assistant', content: res.text }])
+      const { cleanText, actions } = parseActionTags(res.text)
+      setChatMessages([...nextMessages, { role: 'assistant', content: cleanText }])
+      // Auto-start pipeline for each parsed action
+      if (settings.agentExecutionEnabled && actions.length > 0) {
+        for (const action of actions) {
+          agentAction.startFromAction(action)
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setStatusMessage(`Chat failed: ${message}`)
@@ -1536,76 +1551,72 @@ export function MainAppShell() {
       style={{ gridTemplateColumns: `${sidebarWidth}px ${SIDEBAR_RESIZER_WIDTH_PX}px 1fr`, gridTemplateRows: '1fr' }}
     >
       <aside className="app-sidebar flex flex-col relative min-w-0 min-h-0 overflow-hidden">
-        <div className="h-14 px-3 pl-16 pt-2 pb-1 app-drag">
-          <div className="h-full rounded-xl border border-slate-200/70 bg-white/80 backdrop-blur-sm shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-1.5 flex items-center justify-between gap-2">
-            <div className="app-nodrag flex items-center gap-0.5">
-              <button
-                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
-                onClick={showHome}
-                aria-label="Home"
-              >
-                <LayoutGrid className="h-3.5 w-3.5" />
-              </button>
-              <button
-                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
-                onClick={() => {
-                  if (route === 'settings') {
-                    setStatusMessage('Search in settings is not available yet')
-                    return
-                  }
-                  setIsSidebarSearchOpen((v) => !v)
-                }}
-                aria-label="Search"
-              >
-                <Search className="h-3.5 w-3.5" />
-              </button>
-              <button
-                className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition"
-                onClick={startNewChat}
-                aria-label="New chat"
-              >
-                <PenSquare className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            <div className="h-5 w-px bg-slate-200/80" />
-
+        <div className="h-14 px-3 pt-2 pb-1 app-drag flex items-start justify-end">
+          <div className="inline-flex h-10 app-nodrag items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/90 px-1.5 shadow-[0_3px_10px_rgba(15,23,42,0.08)] backdrop-blur-sm">
             <button
-              className="app-nodrag h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition"
-              onClick={() => void triggerCapture()}
-              disabled={isCapturing}
-              aria-label="Capture"
-              title="Capture (Cmd+Shift+.)"
+              className={cn(
+                'h-7 w-7 rounded-lg flex items-center justify-center transition-colors duration-200',
+                isSidebarSearchOpen
+                  ? 'bg-slate-900/7 text-slate-700'
+                  : 'text-slate-500 hover:bg-slate-100/90 hover:text-slate-700'
+              )}
+              onClick={() => {
+                if (route === 'settings') {
+                  setStatusMessage('Search in settings is not available yet')
+                  return
+                }
+                setIsSidebarSearchOpen((v) => !v)
+              }}
+              aria-label="Search"
+              title="Search captures"
+              aria-expanded={isSidebarSearchOpen}
             >
-              {isCapturing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              <Search className="h-3.5 w-3.5" />
+            </button>
+            <button
+              className="h-7 w-7 rounded-lg text-slate-500 hover:bg-slate-100/90 hover:text-slate-700 flex items-center justify-center transition-colors duration-200"
+              onClick={startNewChat}
+              aria-label="New chat"
+              title="New chat"
+            >
+              <PenSquare className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
 
-        {route !== 'settings' && isSidebarSearchOpen && (
-          <div className="px-3 pb-2">
-            <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 flex items-center gap-2">
-              <Search className="h-4 w-4 text-slate-400" />
-              <input
-                ref={sidebarSearchRef}
-                value={sidebarQuery}
-                onChange={(e) => setSidebarQuery(e.target.value)}
-                placeholder="Search"
-                className="app-nodrag flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
-              />
-              <button
-                className="app-nodrag text-slate-400 hover:text-slate-600 transition"
-                onClick={() => {
-                  setSidebarQuery('')
-                  setIsSidebarSearchOpen(false)
-                }}
-                aria-label="Close search"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {route !== 'settings' && isSidebarSearchOpen && (
+            <motion.div
+              key="sidebar-search"
+              initial={{ opacity: 0, height: 0, y: -6, marginBottom: 0 }}
+              animate={{ opacity: 1, height: 'auto', y: 0, marginBottom: 8 }}
+              exit={{ opacity: 0, height: 0, y: -4, marginBottom: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="px-3 overflow-hidden"
+            >
+              <div className="rounded-xl bg-white/95 border border-slate-200/85 shadow-[0_6px_16px_rgba(15,23,42,0.08)] px-3 py-2 flex items-center gap-2">
+                <Search className="h-4 w-4 text-slate-400 shrink-0" />
+                <input
+                  ref={sidebarSearchRef}
+                  value={sidebarQuery}
+                  onChange={(e) => setSidebarQuery(e.target.value)}
+                  placeholder="Search captures"
+                  className="app-nodrag flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                />
+                <button
+                  className="app-nodrag h-6 w-6 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition flex items-center justify-center"
+                  onClick={() => {
+                    setSidebarQuery('')
+                    setIsSidebarSearchOpen(false)
+                  }}
+                  aria-label="Close search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3 app-nodrag flex flex-col">
           {route === 'settings' ? (
@@ -1649,6 +1660,18 @@ export function MainAppShell() {
                 >
                   <HardDrive className="h-4 w-4 text-slate-500" />
                   <span className="flex-1 text-left">Storage</span>
+                </button>
+                <button
+                  className={cn(
+                    'app-nodrag w-full flex items-center gap-3 px-3 py-2 rounded-2xl border transition text-sm',
+                    settingsSection === 'agent'
+                      ? 'bg-white/80 border-slate-200/70 shadow-sm text-slate-800'
+                      : 'bg-white/0 border-transparent text-slate-600 hover:bg-white/60 hover:border-slate-200/60'
+                  )}
+                  onClick={() => setSettingsSection('agent')}
+                >
+                  <Rocket className="h-4 w-4 text-slate-500" />
+                  <span className="flex-1 text-left">Agent</span>
                 </button>
                 <button
                   className={cn(
@@ -1955,7 +1978,7 @@ export function MainAppShell() {
 
         {route === 'settings' && (
           <div className="flex-1 min-h-0 flex flex-col px-10 pt-3 pb-8">
-            <div className="mx-auto w-full max-w-4xl min-h-0 flex flex-col">
+            <div className="mx-auto w-full max-w-4xl min-h-0 flex-1 flex flex-col">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-xs text-slate-400">Settings</div>
@@ -2000,27 +2023,11 @@ export function MainAppShell() {
                     {settingsSection === 'general' && (
                       <>
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <div className="text-lg font-semibold text-slate-800">Recording status</div>
-                              <div className="text-sm text-slate-500 mt-1">
-                                Ensure screen capture and metadata collection are available.
-                              </div>
+                          <div>
+                            <div className="text-lg font-semibold text-slate-800">Recording status</div>
+                            <div className="text-sm text-slate-500 mt-1">
+                              Ensure screen capture and metadata collection are available.
                             </div>
-                            <button
-                              onClick={() => void runRuntimeStatusCheck()}
-                              disabled={isCheckingRuntimeStatus}
-                              className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                            >
-                              {isCheckingRuntimeStatus ? (
-                                <>
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  Checking
-                                </>
-                              ) : (
-                                'Run status check'
-                              )}
-                            </button>
                           </div>
                           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
@@ -2120,6 +2127,92 @@ export function MainAppShell() {
                       </>
                     )}
 
+                    {settingsSection === 'agent' && (
+                      <>
+                        <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
+                          <div className="text-lg font-semibold text-slate-800">Agent Execution</div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Let Detector create Reminders and Calendar events from screen context and chat.
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <button
+                              className="app-nodrag w-full rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-white transition"
+                              onClick={() => toggleSetting('agentExecutionEnabled')}
+                            >
+                              <span>
+                                <span className="block text-sm font-semibold text-slate-800">Enable Agent Execution</span>
+                                <span className="block text-xs text-slate-500 mt-0.5">
+                                  When enabled, chat responses can propose actionable items (e.g. create a Reminder).
+                                  You will always be asked to confirm before any action is executed.
+                                </span>
+                              </span>
+                              <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                {settings.agentExecutionEnabled
+                                  ? <ToggleRight className="h-4 w-4 text-[var(--ui-accent)]" />
+                                  : <ToggleLeft className="h-4 w-4 text-slate-400" />}
+                                {settings.agentExecutionEnabled ? 'On' : 'Off'}
+                              </span>
+                            </button>
+
+                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3">
+                              <span className="block text-sm font-semibold text-slate-800">Reminders Permission</span>
+                              <span className="block text-xs text-slate-500 mt-0.5">
+                                Detector needs Automation permission for Reminders to create items.
+                              </span>
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-slate-100 border border-slate-200/70 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
+                                  onClick={async () => {
+                                    const probe = await window.electronAPI.agentPermissionProbe()
+                                    setAgentPermissionResult(probe.reminders)
+                                    setStatusMessage(
+                                      probe.reminders === 'granted'
+                                        ? 'Reminders permission: granted'
+                                        : probe.reminders === 'denied'
+                                          ? 'Reminders permission: denied — open System Settings → Privacy → Automation'
+                                          : 'Reminders permission: unknown (could not probe)'
+                                    )
+                                    setStatusMessageType(probe.reminders === 'granted' ? 'success' : probe.reminders === 'denied' ? 'error' : 'info')
+                                  }}
+                                >
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                  Check Permission
+                                </button>
+                                {agentPermissionResult && (
+                                  <span
+                                    className={cn(
+                                      'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-all',
+                                      agentPermissionResult === 'granted'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                                        : agentPermissionResult === 'denied'
+                                          ? 'bg-rose-50 text-rose-700 border-rose-200/70'
+                                          : 'bg-amber-50 text-amber-700 border-amber-200/70'
+                                    )}
+                                  >
+                                    {agentPermissionResult === 'granted' && <CircleCheck className="h-3 w-3" />}
+                                    {agentPermissionResult === 'denied' && <ShieldAlert className="h-3 w-3" />}
+                                    {agentPermissionResult}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-sm text-slate-600">
+                          <div>Agent actions are logged to an append-only audit file. All execution requires explicit confirmation.</div>
+                          <button
+                            className="app-nodrag mt-2 inline-flex items-center gap-2 rounded-xl bg-slate-100 border border-slate-200/70 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
+                            onClick={() => void window.electronAPI.revealStoragePath('agent-actions.jsonl')}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open Audit Log
+                          </button>
+                        </div>
+                      </>
+                    )}
+
                     {settingsSection === 'other' && (
                       <>
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
@@ -2169,7 +2262,9 @@ export function MainAppShell() {
                                 <span className="block text-xs text-slate-500 mt-0.5">Start Detector when macOS signs in.</span>
                               </span>
                               <span className="inline-flex items-center gap-2 text-xs text-slate-500">
-                                <ToggleLeft className={cn('h-4 w-4', settings.launchAtLogin ? 'text-[var(--ui-accent)]' : 'text-slate-400')} />
+                                {settings.launchAtLogin
+                                  ? <ToggleRight className="h-4 w-4 text-[var(--ui-accent)]" />
+                                  : <ToggleLeft className="h-4 w-4 text-slate-400" />}
                                 {settings.launchAtLogin ? 'On' : 'Off'}
                               </span>
                             </button>
@@ -2183,7 +2278,9 @@ export function MainAppShell() {
                                 <span className="block text-xs text-slate-500 mt-0.5">Off = menu bar only mode.</span>
                               </span>
                               <span className="inline-flex items-center gap-2 text-xs text-slate-500">
-                                <ToggleLeft className={cn('h-4 w-4', settings.showDockIcon ? 'text-[var(--ui-accent)]' : 'text-slate-400')} />
+                                {settings.showDockIcon
+                                  ? <ToggleRight className="h-4 w-4 text-[var(--ui-accent)]" />
+                                  : <ToggleLeft className="h-4 w-4 text-slate-400" />}
                                 {settings.showDockIcon ? 'On' : 'Off'}
                               </span>
                             </button>
@@ -2375,14 +2472,22 @@ export function MainAppShell() {
                                     : 'Missing'}
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2">
+                            <div className={cn(
+                              'rounded-2xl border px-3 py-2 transition-colors',
+                              providerHealth
+                                ? providerHealth.ok
+                                  ? 'bg-emerald-50/80 border-emerald-200/70'
+                                  : 'bg-rose-50/80 border-rose-200/70'
+                                : 'bg-white/70 border-slate-200/70'
+                            )}>
                               <div className="text-[11px] uppercase tracking-wide text-slate-400">Connection health</div>
                               <div
                                 className={cn(
-                                  'mt-1 text-sm font-medium',
+                                  'mt-1 text-sm font-medium flex items-center gap-1.5',
                                   providerHealth ? (providerHealth.ok ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-500'
                                 )}
                               >
+                                {providerHealth?.ok && <CircleCheck className="h-3.5 w-3.5" />}
                                 {providerHealth ? (providerHealth.ok ? 'Healthy' : 'Degraded') : 'Not checked'}
                               </div>
                             </div>
@@ -2415,9 +2520,24 @@ export function MainAppShell() {
                               )}
                             </button>
                           </div>
-                          <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3">
+                          <div
+                            className={cn(
+                              'mt-4 rounded-2xl border px-4 py-3 transition-colors',
+                              providerHealth
+                                ? providerHealth.ok
+                                  ? 'bg-emerald-50/80 border-emerald-200/70'
+                                  : 'bg-rose-50/80 border-rose-200/70'
+                                : 'bg-white/70 border-slate-200/70'
+                            )}
+                          >
                             <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium text-slate-800">
+                              <div className={cn(
+                                'text-sm font-medium flex items-center gap-2',
+                                providerHealth
+                                  ? providerHealth.ok ? 'text-emerald-700' : 'text-rose-700'
+                                  : 'text-slate-800'
+                              )}>
+                                {providerHealth?.ok && <CircleCheck className="h-4 w-4" />}
                                 {providerHealth
                                   ? providerHealth.ok
                                     ? 'Connection healthy'
@@ -2429,7 +2549,10 @@ export function MainAppShell() {
                               </span>
                             </div>
                             {providerHealth && (
-                              <div className="mt-2 text-xs text-slate-500">
+                              <div className={cn(
+                                'mt-2 text-xs',
+                                providerHealth.ok ? 'text-emerald-600' : 'text-rose-600'
+                              )}>
                                 {providerHealth.message} · latency {providerHealth.latencyMs} ms
                               </div>
                             )}
@@ -2812,30 +2935,61 @@ export function MainAppShell() {
                 </div>
               </div>
 
-              <div className="mt-6 rounded-2xl bg-white/80 border border-slate-200/70 shadow-sm px-4 py-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500 truncate">
-                  {statusMessage
-                    ? statusMessage
-                    : settingsSection === 'general'
-                      ? `Last status check: ${formatRelativeTime(runtimeStatus?.lastCheckedAt)}`
-                      : settingsSection === 'provider' && providerLastCheckedAt
-                        ? `Provider health checked ${formatRelativeTime(providerLastCheckedAt)}`
-                        : isSavingSettings
-                          ? 'Saving...'
-                          : isDirty
-                            ? 'Unsaved changes'
-                            : 'All changes saved'}
-                </div>
+              <div className="shrink-0 pt-4 mt-auto">
+                <div className={cn(
+                  'rounded-2xl border px-4 py-3 flex items-center justify-between gap-3 transition-colors shadow-[0_-2px_12px_rgba(0,0,0,0.06)]',
+                  statusMessage && statusMessageType === 'success'
+                    ? 'bg-emerald-50/80 border-emerald-200/70'
+                    : statusMessage && statusMessageType === 'error'
+                      ? 'bg-rose-50/80 border-rose-200/70'
+                      : 'bg-white/80 border-slate-200/70'
+                )}>
+                  <div className={cn(
+                    'text-sm truncate flex items-center gap-2',
+                    statusMessage && statusMessageType === 'success'
+                      ? 'text-emerald-700 font-medium'
+                      : statusMessage && statusMessageType === 'error'
+                        ? 'text-rose-700 font-medium'
+                        : 'text-slate-500'
+                  )}>
+                    {statusMessage && statusMessageType === 'success' && <CircleCheck className="h-4 w-4 shrink-0" />}
+                    {statusMessage
+                      ? statusMessage
+                      : settingsSection === 'general'
+                        ? `Last status check: ${formatRelativeTime(runtimeStatus?.lastCheckedAt)}`
+                        : settingsSection === 'provider' && providerLastCheckedAt
+                          ? `Provider health checked ${formatRelativeTime(providerLastCheckedAt)}`
+                          : isSavingSettings
+                            ? 'Saving...'
+                            : isDirty
+                              ? 'Unsaved changes'
+                              : 'All changes saved'}
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={showHome}
-                    className="app-nodrag inline-flex items-center justify-center rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
-                  >
-                    Close
-                  </button>
-                  {settingsSection === 'provider' && (
-                    <>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={showHome}
+                      className="app-nodrag inline-flex items-center justify-center rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                    >
+                      Close
+                    </button>
+                    {settingsSection === 'general' && (
+                      <button
+                        onClick={() => void runRuntimeStatusCheck()}
+                        disabled={isCheckingRuntimeStatus}
+                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                      >
+                        {isCheckingRuntimeStatus ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Checking...
+                          </>
+                        ) : (
+                          'Run status check'
+                        )}
+                      </button>
+                    )}
+                    {settingsSection === 'provider' && (
                       <button
                         onClick={testApi}
                         disabled={isTestingApi || isLoadingSettings}
@@ -2853,10 +3007,8 @@ export function MainAppShell() {
                           </>
                         )}
                       </button>
-                    </>
-                  )}
-                  {settingsSection !== 'storage' && (
-                    <>
+                    )}
+                    {settingsSection !== 'storage' && (
                       <button
                         onClick={saveSettings}
                         disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
@@ -2874,8 +3026,8 @@ export function MainAppShell() {
                           </>
                         )}
                       </button>
-                    </>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -3340,6 +3492,46 @@ export function MainAppShell() {
                       Thinking...
                     </div>
                   )}
+
+                  {/* Agent action review card */}
+                  {agentAction.pendingAction && agentAction.pendingAction.action && (
+                    <div className="mr-auto max-w-[85%]">
+                      <ActionReviewCard
+                        action={agentAction.pendingAction.action}
+                        requestId={agentAction.pendingAction.requestId}
+                        stage={agentAction.pendingAction.stage}
+                        validation={agentAction.pendingAction.validation}
+                        result={agentAction.pendingAction.result}
+                        error={agentAction.pendingAction.error}
+                        onConfirm={() =>
+                          agentAction.confirm(
+                            agentAction.pendingAction!.requestId,
+                            agentAction.pendingAction!.actionId
+                          )
+                        }
+                        onCancel={() =>
+                          agentAction.cancel(
+                            agentAction.pendingAction!.requestId,
+                            agentAction.pendingAction!.actionId
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+                  {agentAction.result && agentAction.result.action && (
+                    <div className="mr-auto max-w-[85%]">
+                      <ActionReviewCard
+                        action={agentAction.result.action}
+                        requestId={agentAction.result.requestId}
+                        stage={agentAction.result.stage}
+                        result={agentAction.result.result}
+                        error={agentAction.result.error}
+                        onConfirm={() => {}}
+                        onCancel={() => {}}
+                      />
+                    </div>
+                  )}
+
                   <div ref={chatEndRef} />
                 </div>
 
