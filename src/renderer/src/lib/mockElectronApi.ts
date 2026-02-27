@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   shareCrashReports: false,
   shareAnonymousUsage: false,
   showTimelineIcons: false,
+  agentExecutionEnabled: false,
   outputLanguageOverride: '',
   capturePromptTemplate: undefined,
   chatPromptTemplate: undefined
@@ -642,6 +643,13 @@ export function createMockElectronAPI(): ElectronAPI {
         message: `Debug reprocess simulated for ${payload.day}`,
         count: history.length
       }
-    }
+    },
+
+    // ── Agent execution (mock) ──
+
+    agentStart: async () => ({ ok: true }),
+    agentConfirm: async () => ({ ok: true }),
+    onAgentStatusPush: () => () => {},
+    agentPermissionProbe: async () => ({ reminders: 'unknown' as const })
   }
 }

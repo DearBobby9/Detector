@@ -16,12 +16,14 @@ import { captureAllScreens } from './screenshot'
 import { getActiveWindow } from './active-window'
 import { callClaude } from './claude-api'
 import { saveRecord, updateRecordScreenshots } from './database'
-import { createAppWindow, getAppWindow, showAppWindow } from './app-window'
+import { createAppWindow, showAppWindow } from './app-window'
 import { createTray } from './tray'
 import { enforceStorageLimit } from './storage'
 import { persistCaptureScreenshots } from './capture-storage'
 import { getSettings } from './settings'
 import { applyRuntimeSettings } from './runtime-preferences'
+import { broadcastToRenderers } from './broadcast'
+import { setAgentBroadcast } from './agent-pipeline'
 
 // Load .env from project root
 config({ path: join(__dirname, '../../.env') })
@@ -265,19 +267,6 @@ async function orchestrateCapture(): Promise<void> {
   }
 }
 
-function broadcastToRenderers(channel: string, ...args: unknown[]): void {
-  const windows = [getPanelWindow(), getAppWindow()].filter(Boolean) as Array<{
-    isDestroyed: () => boolean
-    webContents: { send: (ch: string, ...a: unknown[]) => void }
-  }>
-
-  for (const win of windows) {
-    if (!win.isDestroyed()) {
-      win.webContents.send(channel, ...args)
-    }
-  }
-}
-
 function formatResultText(result: { type: string } & Record<string, unknown>): string {
   if (result.type === 'email-reply') {
     const subject = typeof result.subject === 'string' ? result.subject : ''
@@ -348,6 +337,9 @@ app.whenReady().then(() => {
     triggerCapture: orchestrateCapture,
     getCaptureServiceStatus
   })
+
+  // Wire agent pipeline broadcast
+  setAgentBroadcast(broadcastToRenderers)
 
   // Create the panel window (hidden, pre-loaded)
   createPanelWindow()

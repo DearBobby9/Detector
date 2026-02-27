@@ -2,6 +2,9 @@ import { ipcMain, clipboard } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import { is } from '@electron-toolkit/utils'
 import { AppSettings, CaptureServiceStatus, ChatMessage } from '@shared/types'
+import type { AgentActionPlan } from '@shared/agent-types'
+import { startAgentPipeline, confirmAgentAction } from './agent-pipeline'
+import { probeReminderPermission } from './agent-validator'
 import { collapsePanel, enterPanelDetailView, exitPanelDetailView, expandPanel, hidePanel } from './panel-window'
 import { getSettings, saveSettings } from './settings'
 import { getHistory } from './database'
@@ -174,6 +177,25 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
       message: `Debug reprocess simulated for ${day}. Found ${count} capture(s) in range.`,
       count
     }
+  })
+
+  // ── Agent execution handlers ──
+
+  ipcMain.handle(IPC.AGENT_START, async (_event, plan: AgentActionPlan) => {
+    startAgentPipeline(plan)
+    return { ok: true }
+  })
+
+  ipcMain.handle(
+    IPC.AGENT_CONFIRM,
+    async (_event, payload: { requestId: string; actionId: string; confirmed: boolean }) => {
+      confirmAgentAction(payload.requestId, payload.actionId, payload.confirmed)
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle(IPC.AGENT_PERMISSION_PROBE, async () => {
+    return probeReminderPermission()
   })
 
   console.log('[IPC] Handlers registered')

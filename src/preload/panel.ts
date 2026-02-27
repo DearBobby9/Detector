@@ -11,6 +11,7 @@ import {
   StorageLimitUpdateResult,
   StorageUsageSummary
 } from '@shared/types'
+import type { AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onShowLoading: (callback: () => void) => {
@@ -142,5 +143,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   debugReprocessDay: (payload: { day: string }): Promise<{ ok: boolean; message: string; count?: number }> => {
     return ipcRenderer.invoke(IPC.DEBUG_REPROCESS_DAY, payload)
+  },
+
+  // ── Agent execution ──
+
+  agentStart: (plan: AgentActionPlan): Promise<{ ok: boolean }> => {
+    return ipcRenderer.invoke(IPC.AGENT_START, plan)
+  },
+
+  agentConfirm: (payload: {
+    requestId: string
+    actionId: string
+    confirmed: boolean
+  }): Promise<{ ok: boolean }> => {
+    return ipcRenderer.invoke(IPC.AGENT_CONFIRM, payload)
+  },
+
+  onAgentStatusPush: (cb: (status: AgentStatusPush) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: AgentStatusPush): void => cb(data)
+    ipcRenderer.on(IPC.AGENT_STATUS_PUSH, handler)
+    return () => ipcRenderer.removeListener(IPC.AGENT_STATUS_PUSH, handler)
+  },
+
+  agentPermissionProbe: (): Promise<AgentPermissionProbe> => {
+    return ipcRenderer.invoke(IPC.AGENT_PERMISSION_PROBE)
   }
 })

@@ -208,6 +208,7 @@ export interface AppSettings {
   shareCrashReports: boolean
   shareAnonymousUsage: boolean
   showTimelineIcons: boolean
+  agentExecutionEnabled: boolean
   outputLanguageOverride: string
   capturePromptTemplate?: string
   chatPromptTemplate?: string

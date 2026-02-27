@@ -10,6 +10,12 @@ Use that context to answer the user's follow-up questions and help them take nex
 
 Be concise, practical, and specific.`
 
+const AGENT_ACTION_SUFFIX = `
+
+When you identify an actionable task the user wants to create (reminder, todo, or something with a due date), output it as a structured tag:
+<action>{"type":"create_reminder","title":"...","dueAt":"ISO8601 with timezone","notes":"...","listName":"Reminders"}</action>
+You may include multiple <action> tags in your response. Continue your normal prose response around them. Only output an <action> tag when the user clearly intends to create an actionable item.`
+
 function isAbortError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -50,6 +56,10 @@ function mergeSettings(override?: Partial<AppSettings>): AppSettings {
         : current.shareAnonymousUsage,
     showTimelineIcons:
       typeof override.showTimelineIcons === 'boolean' ? override.showTimelineIcons : current.showTimelineIcons,
+    agentExecutionEnabled:
+      typeof override.agentExecutionEnabled === 'boolean'
+        ? override.agentExecutionEnabled
+        : current.agentExecutionEnabled,
     outputLanguageOverride:
       typeof override.outputLanguageOverride === 'string'
         ? override.outputLanguageOverride
@@ -254,7 +264,10 @@ export async function sendChat(
 
   const apiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
 
-  apiMessages.push({ role: 'system', content: systemPrompt })
+  const fullSystemPrompt = settings.agentExecutionEnabled
+    ? systemPrompt + AGENT_ACTION_SUFFIX
+    : systemPrompt
+  apiMessages.push({ role: 'system', content: fullSystemPrompt })
   if (languageInstruction) {
     apiMessages.push({ role: 'system', content: languageInstruction })
   }

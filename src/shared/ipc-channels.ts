@@ -28,5 +28,9 @@ export const IPC = {
   STORAGE_REVEAL_PATH: 'storage:reveal-path',
   STORAGE_COPY_PATH: 'storage:copy-path',
   OTHER_EXPORT_TIMELINE: 'other:export-timeline',
-  DEBUG_REPROCESS_DAY: 'debug:reprocess-day'
+  DEBUG_REPROCESS_DAY: 'debug:reprocess-day',
+  AGENT_START: 'agent:start',
+  AGENT_CONFIRM: 'agent:confirm',
+  AGENT_STATUS_PUSH: 'agent:status-push',
+  AGENT_PERMISSION_PROBE: 'agent:permission-probe'
 } as const

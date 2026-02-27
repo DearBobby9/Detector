@@ -11,6 +11,7 @@ import type {
   StorageLimitUpdateResult,
   StorageUsageSummary
 } from '@shared/types'
+import type { AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
 
 export type PanelState =
   | { status: 'hidden' }
@@ -54,6 +55,10 @@ export interface ElectronAPI {
     toDate?: string
   }) => Promise<{ ok: boolean; path?: string; message?: string; historyCount?: number; memoryCount?: number }>
   debugReprocessDay: (payload: { day: string }) => Promise<{ ok: boolean; message: string; count?: number }>
+  agentStart: (plan: AgentActionPlan) => Promise<{ ok: boolean }>
+  agentConfirm: (payload: { requestId: string; actionId: string; confirmed: boolean }) => Promise<{ ok: boolean }>
+  onAgentStatusPush: (cb: (status: AgentStatusPush) => void) => () => void
+  agentPermissionProbe: () => Promise<AgentPermissionProbe>
 }
 
 declare global {

@@ -79,6 +79,7 @@ function getDefaultSettings(): AppSettings {
     shareCrashReports: false,
     shareAnonymousUsage: false,
     showTimelineIcons: false,
+    agentExecutionEnabled: false,
     outputLanguageOverride: '',
     capturePromptTemplate: undefined,
     chatPromptTemplate: undefined
@@ -195,6 +196,10 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     (input as Partial<AppSettings> & { showTimelineIcons?: unknown }).showTimelineIcons,
     defaults.showTimelineIcons
   )
+  const agentExecutionEnabled = normalizeBoolean(
+    (input as Partial<AppSettings> & { agentExecutionEnabled?: unknown }).agentExecutionEnabled,
+    defaults.agentExecutionEnabled
+  )
   const outputLanguageOverride =
     typeof input.outputLanguageOverride === 'string'
       ? input.outputLanguageOverride.trim().slice(0, 64)
@@ -222,6 +227,7 @@ function normalizeSettings(input: Partial<AppSettings>): AppSettings {
     shareCrashReports,
     shareAnonymousUsage,
     showTimelineIcons,
+    agentExecutionEnabled,
     outputLanguageOverride,
     capturePromptTemplate,
     chatPromptTemplate
