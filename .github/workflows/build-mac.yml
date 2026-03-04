@@ -86,6 +86,7 @@ jobs:
         run: |
           npx electron-builder --mac zip \
             --arm64 \
+            --publish never \
             -c.mac.identity="-" \
             -c.mac.icon="build/icon.icns" \
             -c.artifactName='${productName}-${version}-mac-arm64.${ext}' \
