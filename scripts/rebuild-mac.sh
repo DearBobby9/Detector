@@ -126,6 +126,15 @@ if [[ -d "$BUILD_APP_PATH" && "$BUILD_APP_PATH" != "$INSTALLED_APP_PATH" ]]; the
   echo "[rebuild] cleaned build app copy: $BUILD_APP_PATH"
 fi
 
+# Ad-hoc codesign with entitlements so macOS can persist Screen Recording permission.
+ENTITLEMENTS="$ROOT/entitlements.mac.plist"
+if [[ -f "$ENTITLEMENTS" ]]; then
+  echo "[rebuild] codesign (ad-hoc) with entitlements"
+  codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$INSTALLED_APP_PATH"
+else
+  echo "[rebuild] warning: entitlements.mac.plist not found, skipping codesign"
+fi
+
 # Best-effort clear quarantine/provenance attributes on local build install.
 xattr -dr com.apple.quarantine "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
 xattr -dr com.apple.provenance "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
