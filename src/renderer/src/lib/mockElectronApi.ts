@@ -274,6 +274,7 @@ export function createMockElectronAPI(): ElectronAPI {
   let nextMemoryId = (memory[memory.length - 1]?.id ?? 0) + 1
   let runtimeStatus: SettingsRuntimeStatus = {
     screenPermission: 'granted',
+    accessibilityPermission: 'granted',
     automationPermission: 'granted',
     captureService: 'idle',
     lastCheckedAt: Date.now()
@@ -399,6 +400,7 @@ export function createMockElectronAPI(): ElectronAPI {
       await sleep(240)
       runtimeStatus = {
         screenPermission: 'granted',
+        accessibilityPermission: 'granted',
         automationPermission: 'granted',
         captureService: 'idle',
         lastCheckedAt: Date.now()
@@ -650,6 +652,17 @@ export function createMockElectronAPI(): ElectronAPI {
     agentStart: async () => ({ ok: true }),
     agentConfirm: async () => ({ ok: true }),
     onAgentStatusPush: () => () => {},
-    agentPermissionProbe: async () => ({ reminders: 'unknown' as const })
+    agentPermissionProbe: async () => ({ reminders: 'unknown' as const }),
+
+    // ── Diagnostics (mock) ──
+    checkCodexCli: async () => {
+      await sleep(150)
+      return { available: true, path: '/usr/local/bin/codex', version: '0.1.0' }
+    },
+    openSystemSettings: async (pane: string) => {
+      await sleep(80)
+      console.log('[MockAPI] openSystemSettings:', pane)
+      return { ok: true, pane }
+    }
   }
 }

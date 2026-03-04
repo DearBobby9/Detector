@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import {
   AppSettings,
+  CodexCliDiagnosticResult,
   SettingsRuntimeStatus,
   DetectionResult,
   MemoryItem,
@@ -11,7 +12,7 @@ import {
   StorageLimitUpdateResult,
   StorageUsageSummary
 } from '@shared/types'
-import type { AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
+import type { AgentActionEdits, AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onShowLoading: (callback: () => void) => {
@@ -155,6 +156,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     requestId: string
     actionId: string
     confirmed: boolean
+    edits?: AgentActionEdits
   }): Promise<{ ok: boolean }> => {
     return ipcRenderer.invoke(IPC.AGENT_CONFIRM, payload)
   },
@@ -167,5 +169,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   agentPermissionProbe: (): Promise<AgentPermissionProbe> => {
     return ipcRenderer.invoke(IPC.AGENT_PERMISSION_PROBE)
+  },
+
+  // ── Diagnostics ──
+
+  checkCodexCli: (): Promise<CodexCliDiagnosticResult> => {
+    return ipcRenderer.invoke(IPC.DIAGNOSTICS_CHECK_CODEX_CLI)
+  },
+
+  openSystemSettings: (pane: string): Promise<{ ok: boolean; pane?: string; error?: string }> => {
+    return ipcRenderer.invoke(IPC.DIAGNOSTICS_OPEN_SYSTEM_SETTINGS, pane)
   }
 })

@@ -67,3 +67,45 @@
 - `src/main/chat-codex-cli.ts` (new)
 - `src/renderer/src/lib/mockElectronApi.ts`
 - `src/renderer/src/components/MainAppShell.tsx`
+
+## Next-step Agent direction (2026-02-26 draft)
+
+### Goal
+
+Add an execution-capable desktop agent path that can turn extracted context (from capture + chat) into real macOS actions:
+
+- create Reminder
+- create Calendar event
+
+### Core design decisions
+
+- Keep model and executor separated:
+  - model outputs structured action plan JSON only
+  - main process validates and executes through strict allowlisted tools
+- Add mandatory user confirmation before execution.
+- Introduce strict multi-layer validation:
+  - schema validation
+  - policy validation (safe defaults, idempotency, date sanity)
+  - runtime validation (permission/access checks)
+- Introduce append-only audit logging for every stage:
+  - planned -> validated -> confirmed -> executed/failed
+
+### Execution architecture sketch
+
+- Renderer:
+  - display proposed actions
+  - show validation issues
+  - request explicit confirm
+- Preload/IPC:
+  - expose `agentPlan`, `agentValidate`, `agentExecute`
+- Main:
+  - parse action plan
+  - run validators
+  - dispatch to macOS adapters
+  - write audit logs
+
+### Delivery strategy
+
+- V1: reminder-only vertical slice (plan + validate + confirm + execute + log)
+- V2: calendar event support
+- V3: richer tools and routing policies

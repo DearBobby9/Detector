@@ -607,16 +607,18 @@ export function CaptureAnalysis({ data, onCopy, onDetailViewChange, detailCloseS
           {/* Agent action review card (capture path) */}
           {agentAction.pendingAction && agentAction.pendingAction.action && (
             <ActionReviewCard
+              key={agentAction.pendingAction.actionId}
               action={agentAction.pendingAction.action}
               requestId={agentAction.pendingAction.requestId}
               stage={agentAction.pendingAction.stage}
               validation={agentAction.pendingAction.validation}
               result={agentAction.pendingAction.result}
               error={agentAction.pendingAction.error}
-              onConfirm={() =>
+              onConfirm={(edits) =>
                 agentAction.confirm(
                   agentAction.pendingAction!.requestId,
-                  agentAction.pendingAction!.actionId
+                  agentAction.pendingAction!.actionId,
+                  edits
                 )
               }
               onCancel={() =>

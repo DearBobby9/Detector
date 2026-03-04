@@ -10,7 +10,6 @@ const FALLBACK_CODEX_PATH = 'codex'
 const FALLBACK_CODEX_TIMEOUT_MS = 120000
 const MCP_LIST_TIMEOUT_CAP_MS = 15000
 const OUTPUT_TAIL_LENGTH = 320
-const FALLBACK_DISABLED_MCP_SERVERS = ['unityMCP']
 
 function trimTrailingLineBreaks(value: string): string {
   return value.replace(/\s+$/, '')
@@ -201,7 +200,7 @@ export async function sendCodexChat(prompt: string, settings: AppSettings): Prom
   const timeoutMs = resolveTimeoutMs(settings)
   const enabledMcpServers = await listEnabledMcpServerNames(codexPath, timeoutMs)
   const model = settings.codexCliModel.trim()
-  const mcpServersToDisable = new Set([...FALLBACK_DISABLED_MCP_SERVERS, ...enabledMcpServers])
+  const mcpServersToDisable = new Set(enabledMcpServers)
 
   const args = ['exec', '--skip-git-repo-check', '--json']
   if (model.length > 0) {

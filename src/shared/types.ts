@@ -173,9 +173,17 @@ export type CaptureServiceStatus = 'active' | 'idle' | 'error'
 
 export interface SettingsRuntimeStatus {
   screenPermission: PermissionStatus
+  accessibilityPermission: PermissionStatus
   automationPermission: PermissionStatus
   captureService: CaptureServiceStatus
   lastCheckedAt: number
+}
+
+export interface CodexCliDiagnosticResult {
+  available: boolean
+  path?: string
+  version?: string
+  error?: string
 }
 
 export interface ScreenPermissionRequestResult {

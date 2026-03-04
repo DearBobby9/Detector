@@ -1,4 +1,5 @@
 import { execFile } from 'child_process'
+import { systemPreferences } from 'electron'
 import type { CaptureServiceStatus, PermissionStatus, SettingsRuntimeStatus } from '@shared/types'
 import { getActiveWindow } from './active-window'
 import { getScreenPermissionStatus } from './screen-permission'
@@ -35,8 +36,20 @@ interface AutomationProbeResult {
   visibleBrowsers: number
 }
 
+function getAccessibilityPermission(): PermissionStatus {
+  try {
+    const trusted = systemPreferences.isTrustedAccessibilityClient(false)
+    // macOS does not distinguish "never prompted" from "explicitly denied" when called
+    // with false (no prompt). We return 'not-determined' as a conservative label.
+    return trusted ? 'granted' : 'not-determined'
+  } catch {
+    return 'unknown'
+  }
+}
+
 let lastRuntimeStatus: SettingsRuntimeStatus = {
   screenPermission: 'unknown',
+  accessibilityPermission: 'unknown',
   automationPermission: 'unknown',
   captureService: 'idle',
   lastCheckedAt: 0
@@ -121,6 +134,7 @@ export async function runStatusCheck(
 
   const status: SettingsRuntimeStatus = {
     screenPermission: getScreenPermissionStatus(),
+    accessibilityPermission: getAccessibilityPermission(),
     automationPermission,
     captureService: getCaptureServiceStatus(),
     lastCheckedAt: Date.now()

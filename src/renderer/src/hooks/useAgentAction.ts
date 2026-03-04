@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { AgentAction, AgentActionPlan, AgentStatusPush } from '@shared/agent-types'
+import type { AgentAction, AgentActionEdits, AgentActionPlan, AgentStatusPush } from '@shared/agent-types'
 
 const TERMINAL_STAGES = new Set(['EXECUTED', 'FAILED', 'CANCELLED'])
 const RESULT_DISMISS_MS = 8000
@@ -35,8 +35,8 @@ export function useAgentAction() {
     return unsub
   }, [])
 
-  const confirm = useCallback((requestId: string, actionId: string) => {
-    window.electronAPI.agentConfirm({ requestId, actionId, confirmed: true })
+  const confirm = useCallback((requestId: string, actionId: string, edits?: AgentActionEdits) => {
+    window.electronAPI.agentConfirm({ requestId, actionId, confirmed: true, edits })
   }, [])
 
   const cancel = useCallback((requestId: string, actionId: string) => {

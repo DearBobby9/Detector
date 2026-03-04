@@ -1,6 +1,7 @@
 import { IPC } from '@shared/ipc-channels'
 import type {
   AgentAction,
+  AgentActionEdits,
   AgentActionPlan,
   AgentStage,
   AgentStatusPush,
@@ -47,7 +48,12 @@ export function startAgentPipeline(plan: AgentActionPlan): void {
   }
 }
 
-export function confirmAgentAction(requestId: string, actionId: string, confirmed: boolean): void {
+export function confirmAgentAction(
+  requestId: string,
+  actionId: string,
+  confirmed: boolean,
+  edits?: AgentActionEdits
+): void {
   const entry = activePipelines.get(requestId)
   if (!entry) {
     console.warn('[AgentPipeline] No active pipeline for requestId:', requestId)
@@ -72,8 +78,37 @@ export function confirmAgentAction(requestId: string, actionId: string, confirme
     return
   }
 
-  transition(entry, action, requestId, 'CONFIRMED')
-  void executeAction(entry, action, requestId)
+  // Apply user edits — clone to preserve original for audit trail
+  let finalAction = action
+  if (edits) {
+    finalAction = { ...action }
+    if (edits.title !== undefined) finalAction.title = edits.title
+    if (edits.notes !== undefined) finalAction.notes = edits.notes || undefined
+    if (edits.dueAt !== undefined) finalAction.dueAt = edits.dueAt === null ? undefined : edits.dueAt
+    if (edits.listName !== undefined) finalAction.listName = edits.listName || undefined
+
+    console.log('[AgentPipeline] Edits applied:', { original: action.title, edited: finalAction.title })
+
+    // Re-validate with edited fields
+    const revalidation = validateAction(finalAction)
+    if (!revalidation.ok) {
+      const errorIssues = revalidation.issues.filter((i) => i.severity === 'error')
+      console.log('[AgentPipeline] Re-validation failed after edits:', errorIssues)
+      pushStatus(requestId, finalAction, 'FAILED', {
+        validation: revalidation,
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: errorIssues.map((i) => i.message).join('; ')
+        }
+      })
+      entry.stages.set(finalAction.id, 'FAILED')
+      scheduleCleanup(requestId)
+      return
+    }
+  }
+
+  transition(entry, finalAction, requestId, 'CONFIRMED')
+  void executeAction(entry, finalAction, requestId)
 }
 
 // ── Internal ──

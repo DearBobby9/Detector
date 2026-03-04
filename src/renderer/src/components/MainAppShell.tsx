@@ -7,6 +7,7 @@ import type {
   BrowserSessionInfo,
   BrowserTabInfo,
   ChatMessage,
+  CodexCliDiagnosticResult,
   HistoryRecord,
   MemoryItem,
   SettingsRuntimeStatus,
@@ -42,8 +43,12 @@ import {
   ShieldAlert,
   ShieldCheck,
   CircleCheck,
+  ClipboardCopy,
   SlidersHorizontal,
   Sparkles,
+  Terminal,
+  Key,
+  Wifi,
   ToggleLeft,
   ToggleRight,
   X
@@ -61,6 +66,14 @@ const MIN_STORAGE_MB = 50
 const MAX_STORAGE_MB = 5120
 
 type SettingsSection = 'general' | 'storage' | 'provider' | 'agent' | 'other'
+
+type DiagnosticKey = 'screenRecording' | 'accessibility' | 'automation' | 'apiKey' | 'endpoint' | 'codexCli'
+type DiagnosticStatus = 'idle' | 'checking' | 'pass' | 'fail' | 'warn'
+interface DiagnosticItem {
+  status: DiagnosticStatus
+  detail?: string
+}
+type DiagnosticMap = Partial<Record<DiagnosticKey, DiagnosticItem>>
 
 const FALLBACK_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
@@ -300,6 +313,10 @@ function truncateText(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
 }
 
+const SECTION_COLLAPSE_TRANSITION = { duration: 0.25, ease: [0.4, 0, 0.2, 1] as const }
+const SECTION_INITIAL = { height: 0, opacity: 0 } as const
+const SECTION_ANIMATE = { height: 'auto' as const, opacity: 1 }
+
 export function MainAppShell() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), [])
   const demoMode = urlParams.get('demo') === '1'
@@ -319,9 +336,6 @@ export function MainAppShell() {
   const [isSavingStorageLimit, setIsSavingStorageLimit] = useState(false)
   const [isEnforcingStorageLimit, setIsEnforcingStorageLimit] = useState(false)
   const [runtimeStatus, setRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null)
-  const [isCheckingRuntimeStatus, setIsCheckingRuntimeStatus] = useState(false)
-  const [isRequestingScreenPermission, setIsRequestingScreenPermission] = useState(false)
-  const [isOpeningScreenSettings, setIsOpeningScreenSettings] = useState(false)
   const [providerHealth, setProviderHealth] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null)
   const [providerLastCheckedAt, setProviderLastCheckedAt] = useState<number | null>(null)
   const [isExportingTimeline, setIsExportingTimeline] = useState(false)
@@ -350,6 +364,25 @@ export function MainAppShell() {
   const [isLoadingScreenshotPreview, setIsLoadingScreenshotPreview] = useState(false)
   const [screenshotPreviewError, setScreenshotPreviewError] = useState<string | null>(null)
   const [expandedModalCandidateMap, setExpandedModalCandidateMap] = useState<Record<string, boolean>>({})
+  type ContextModalSectionKey = 'screenshot' | 'meta' | 'summary' | 'candidates' | 'browserTabs'
+  const [contextModalSections, setContextModalSections] = useState<Record<ContextModalSectionKey, boolean>>({
+    screenshot: true,
+    meta: true,
+    summary: true,
+    candidates: true,
+    browserTabs: false,
+  })
+
+  const toggleContextModalSection = (key: ContextModalSectionKey) => {
+    setContextModalSections(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  // ── Diagnostics state ──
+  const [diagnostics, setDiagnostics] = useState<DiagnosticMap>({})
+  const [codexCliResult, setCodexCliResult] = useState<CodexCliDiagnosticResult | null>(null)
+  const [isRunningAllDiagnostics, setIsRunningAllDiagnostics] = useState(false)
+  const [diagnosticsLastRunAt, setDiagnosticsLastRunAt] = useState<number | null>(null)
+  const diagnosticsHasAutoRun = useRef(false)
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [statusMessageType, setStatusMessageType] = useState<'success' | 'error' | 'info'>('info')
@@ -695,65 +728,6 @@ export function MainAppShell() {
     }
   }
 
-  const runRuntimeStatusCheck = async (): Promise<void> => {
-    setIsCheckingRuntimeStatus(true)
-    setStatusMessage(null)
-    try {
-      const status = await window.electronAPI.runSettingsStatusCheck()
-      setRuntimeStatus(status)
-      setStatusMessage(`Status check complete (${formatRelativeTime(status.lastCheckedAt)})`)
-      setStatusMessageType('success')
-    } catch {
-      setStatusMessage('Failed to run status check')
-      setStatusMessageType('error')
-    } finally {
-      setIsCheckingRuntimeStatus(false)
-    }
-  }
-
-  const requestScreenPermission = async (): Promise<void> => {
-    setIsRequestingScreenPermission(true)
-    setStatusMessage(null)
-    try {
-      const result = await window.electronAPI.requestScreenPermission()
-      setRuntimeStatus((prev) => ({
-        ...(prev || {
-          automationPermission: 'unknown',
-          captureService: 'idle'
-        }),
-        screenPermission: result.status,
-        lastCheckedAt: Date.now()
-      }))
-      setStatusMessage(result.message)
-      void loadRuntimeStatus()
-    } catch {
-      setStatusMessage('Failed to request screen recording permission')
-    } finally {
-      setIsRequestingScreenPermission(false)
-    }
-  }
-
-  const openScreenPermissionSettings = async (): Promise<void> => {
-    setIsOpeningScreenSettings(true)
-    setStatusMessage(null)
-    try {
-      const result = await window.electronAPI.openScreenPermissionSettings()
-      setRuntimeStatus((prev) => ({
-        ...(prev || {
-          automationPermission: 'unknown',
-          captureService: 'idle'
-        }),
-        screenPermission: result.status,
-        lastCheckedAt: Date.now()
-      }))
-      setStatusMessage(result.ok ? 'Opened Screen Recording settings.' : result.message || 'Failed to open settings')
-    } catch {
-      setStatusMessage('Failed to open Screen Recording settings')
-    } finally {
-      setIsOpeningScreenSettings(false)
-    }
-  }
-
   const toggleSetting = (key: keyof Pick<
     AppSettings,
     'launchAtLogin' | 'showDockIcon' | 'shareCrashReports' | 'shareAnonymousUsage' | 'showTimelineIcons' | 'agentExecutionEnabled'
@@ -816,7 +790,12 @@ export function MainAppShell() {
       void refreshStorageUsage()
     }
     if (settingsSection === 'general') {
-      void loadRuntimeStatus()
+      if (!diagnosticsHasAutoRun.current && !isLoadingSettings) {
+        diagnosticsHasAutoRun.current = true
+        void runAllDiagnostics()
+      } else {
+        void loadRuntimeStatus()
+      }
     }
 
     const timer = window.setInterval(() => {
@@ -831,7 +810,7 @@ export function MainAppShell() {
     return () => {
       window.clearInterval(timer)
     }
-  }, [route, settingsSection])
+  }, [route, settingsSection, isLoadingSettings])
 
   useEffect(() => {
     void (async () => {
@@ -1200,17 +1179,34 @@ export function MainAppShell() {
       setShowContextModalBottomFade(false)
       return
     }
-    updateContextModalScrollFades()
+    // Reset all section defaults when modal opens or record changes
+    setContextModalSections({
+      screenshot: true,
+      meta: true,
+      summary: true,
+      candidates: activeMemoryCandidates.length > 0,
+      browserTabs: false,
+    })
+    requestAnimationFrame(() => updateContextModalScrollFades())
   }, [
     isContextModalOpen,
     activeRecord?.id,
+    activeMemoryCandidates.length,
+  ])
+
+  useEffect(() => {
+    if (!isContextModalOpen) return
+    requestAnimationFrame(() => updateContextModalScrollFades())
+  }, [
+    isContextModalOpen,
     activeScreenshots.length,
     selectedScreenshotIndex,
     selectedScreenshotDataUrl,
     isLoadingScreenshotPreview,
     activeMemoryCandidates.length,
     activeMetadata?.tabs.length,
-    activeMetadata?.browserSessions.length
+    activeMetadata?.browserSessions.length,
+    contextModalSections,
   ])
 
   useEffect(() => {
@@ -1383,13 +1379,7 @@ export function MainAppShell() {
 
   const storageCategories: StorageCategoryUsage[] = storageUsage?.categories ?? []
 
-  const runtimeScreenPermission = runtimeStatus?.screenPermission ?? 'unknown'
-  const runtimeAutomationPermission = runtimeStatus?.automationPermission ?? 'unknown'
   const runtimeCaptureService = runtimeStatus?.captureService ?? 'idle'
-  const screenPermissionNeedsRequest =
-    runtimeScreenPermission === 'not-determined' || runtimeScreenPermission === 'unknown'
-  const screenPermissionNeedsSettings =
-    runtimeScreenPermission === 'denied' || runtimeScreenPermission === 'restricted'
   const isApiProvider = settings.chatProvider === 'api'
   const providerDisplayName = isApiProvider ? 'API' : 'Codex CLI'
   const providerKeyConfigured = settings.apiKey.trim().length > 0
@@ -1408,18 +1398,6 @@ export function MainAppShell() {
     : isApiProvider
       ? 'Set API key in Settings first…'
       : 'Set Codex CLI command in Settings first…'
-
-  const permissionToneClass = (permission: SettingsRuntimeStatus['screenPermission']) => {
-    if (permission === 'granted') return 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
-    if (permission === 'denied' || permission === 'restricted')
-      return 'bg-rose-50 text-rose-700 border-rose-200/70'
-    return 'bg-amber-50 text-amber-700 border-amber-200/70'
-  }
-
-  const permissionLabel = (permission: SettingsRuntimeStatus['screenPermission']) => {
-    if (permission === 'not-determined') return 'not determined'
-    return permission
-  }
 
   const captureServiceToneClass = (status: SettingsRuntimeStatus['captureService']) => {
     if (status === 'active') return 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
@@ -1483,6 +1461,113 @@ export function MainAppShell() {
     setSidebarQuery('')
     setStatusMessage(null)
     setRoute('chat')
+  }
+
+  // ── Diagnostics logic ──
+
+  const runAllDiagnostics = async () => {
+    setIsRunningAllDiagnostics(true)
+    setDiagnostics({
+      screenRecording: { status: 'checking' },
+      accessibility: { status: 'checking' },
+      automation: { status: 'checking' },
+      apiKey: { status: 'checking' },
+      endpoint: { status: 'checking' },
+      codexCli: { status: 'checking' }
+    })
+
+    const update = (key: string, item: DiagnosticItem) =>
+      setDiagnostics((prev) => ({ ...prev, [key]: item }))
+
+    // API key (frontend-only)
+    const hasKey = settings.apiKey.trim().length > 0
+    update('apiKey', { status: hasKey ? 'pass' : 'fail', detail: hasKey ? 'Configured' : 'Not set' })
+
+    // Parallel: status check, API test, codex CLI
+    const [statusResult, apiResult, codexResult] = await Promise.allSettled([
+      window.electronAPI.runSettingsStatusCheck(),
+      window.electronAPI.apiTest(),
+      window.electronAPI.checkCodexCli()
+    ])
+
+    // Process status check results
+    if (statusResult.status === 'fulfilled') {
+      const s = statusResult.value
+      setRuntimeStatus(s)
+      update('screenRecording', {
+        status: s.screenPermission === 'granted' ? 'pass' : s.screenPermission === 'denied' ? 'fail' : 'warn',
+        detail: s.screenPermission === 'granted' ? 'Granted' : s.screenPermission
+      })
+      update('accessibility', {
+        status: s.accessibilityPermission === 'granted' ? 'pass' : s.accessibilityPermission === 'denied' ? 'fail' : 'warn',
+        detail: s.accessibilityPermission === 'granted' ? 'Granted' : s.accessibilityPermission
+      })
+      update('automation', {
+        status: s.automationPermission === 'granted' ? 'pass' : s.automationPermission === 'denied' ? 'fail' : 'warn',
+        detail: s.automationPermission === 'granted' ? 'Granted' : s.automationPermission
+      })
+    } else {
+      update('screenRecording', { status: 'fail', detail: 'Check failed' })
+      update('accessibility', { status: 'fail', detail: 'Check failed' })
+      update('automation', { status: 'fail', detail: 'Check failed' })
+    }
+
+    // Process API test results
+    if (apiResult.status === 'fulfilled') {
+      const a = apiResult.value
+      update('endpoint', {
+        status: a.ok ? 'pass' : 'fail',
+        detail: a.ok ? `${a.latencyMs}ms` : a.message
+      })
+    } else {
+      update('endpoint', { status: 'fail', detail: 'Connection failed' })
+    }
+
+    // Process Codex CLI results
+    if (codexResult.status === 'fulfilled') {
+      const c = codexResult.value
+      setCodexCliResult(c)
+      update('codexCli', {
+        status: c.available ? 'pass' : 'fail',
+        detail: c.available ? c.path : c.error || 'Not found'
+      })
+    } else {
+      setCodexCliResult(null)
+      update('codexCli', { status: 'fail', detail: 'Check failed' })
+    }
+
+    setDiagnosticsLastRunAt(Date.now())
+    setIsRunningAllDiagnostics(false)
+  }
+
+  const copyDiagnosticReport = () => {
+    const lines = [
+      '# Detector Diagnostic Report',
+      `Date: ${new Date().toISOString()}`,
+      '',
+      '## System Permissions',
+      `- Screen Recording: ${diagnostics.screenRecording?.detail ?? 'Not checked'}`,
+      `- Accessibility: ${diagnostics.accessibility?.detail ?? 'Not checked'}`,
+      `- Automation: ${diagnostics.automation?.detail ?? 'Not checked'}`,
+      '',
+      '## API Configuration',
+      `- API Key: ${diagnostics.apiKey?.detail ?? 'Not checked'}`,
+      `- Endpoint: ${diagnostics.endpoint?.detail ?? 'Not checked'}`,
+      `- Provider: ${settings.chatProvider}`,
+      `- Model: ${settings.chatProvider === 'codex-cli' ? settings.codexCliModel || '(default)' : settings.apiModel}`,
+      `- Base URL: ${settings.apiBaseUrl}`,
+      ''
+    ]
+    if (settings.chatProvider === 'codex-cli') {
+      lines.push(
+        '## Developer Tools',
+        `- Codex CLI: ${codexCliResult?.available ? `${codexCliResult.path} (${codexCliResult.version})` : codexCliResult?.error || 'Not checked'}`,
+        ''
+      )
+    }
+    window.electronAPI.clipboardWrite(lines.join('\n'))
+    setStatusMessage('Diagnostic report copied to clipboard')
+    setStatusMessageType('success')
   }
 
   const openSettings = (section: SettingsSection = 'general') => {
@@ -1989,16 +2074,20 @@ export function MainAppShell() {
                         ? 'Providers'
                         : settingsSection === 'storage'
                           ? 'Storage'
-                          : 'Other'}
+                          : settingsSection === 'agent'
+                            ? 'Agent'
+                            : 'Other'}
                   </div>
                   <div className="text-sm text-slate-500 mt-1">
                     {settingsSection === 'general'
-                      ? 'Runtime status, permissions, and core app preferences.'
+                      ? 'System health, permissions, and diagnostics.'
                       : settingsSection === 'provider'
                         ? 'Manage provider config, health checks, and prompt templates.'
                         : settingsSection === 'storage'
                           ? 'Track local disk usage and cleanup limits.'
-                          : 'Export, diagnostics, and non-core controls.'}
+                          : settingsSection === 'agent'
+                            ? 'Configure agent execution for Reminders and Calendar events.'
+                            : 'Appearance, preferences, language, and export.'}
                   </div>
                 </div>
                 <button
@@ -2022,103 +2111,139 @@ export function MainAppShell() {
                       <>
                     {settingsSection === 'general' && (
                       <>
+                        {/* ── System Health ── */}
                         <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-6">
-                          <div>
-                            <div className="text-lg font-semibold text-slate-800">Recording status</div>
-                            <div className="text-sm text-slate-500 mt-1">
-                              Ensure screen capture and metadata collection are available.
-                            </div>
+                          <div className="text-lg font-semibold text-slate-800">System Health</div>
+                          <div className="text-sm text-slate-500 mt-1">
+                            Permissions, API connectivity, and tool availability.
                           </div>
-                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
-                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Screen recording</div>
-                              <div className="mt-1 flex items-center gap-2">
-                                {runtimeScreenPermission === 'granted' ? (
-                                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                                ) : (
-                                  <ShieldAlert className="h-4 w-4 text-amber-600" />
-                                )}
-                                <span
-                                  className={cn(
-                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
-                                    permissionToneClass(runtimeScreenPermission)
-                                  )}
-                                >
-                                  {permissionLabel(runtimeScreenPermission)}
-                                </span>
-                              </div>
+                          <div className="mt-4 space-y-2">
+                            {/* Permissions */}
+                            {([
+                              { key: 'screenRecording' as DiagnosticKey, icon: Monitor, label: 'Screen Recording', pane: 'screenRecording' },
+                              { key: 'accessibility' as DiagnosticKey, icon: ShieldCheck, label: 'Accessibility', pane: 'accessibility' },
+                              { key: 'automation' as DiagnosticKey, icon: Globe, label: 'Automation', pane: 'automation' }
+                            ]).map(({ key, icon: Icon, label, pane }) => {
+                              const d = diagnostics[key]
+                              return (
+                                <div key={key} className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3">
+                                  <Icon className="h-4 w-4 text-slate-500 shrink-0" />
+                                  <span className="flex-1 text-sm font-medium text-slate-700">{label}</span>
+                                  <span className={cn(
+                                    'rounded-full border px-2 py-0.5 text-xs font-medium min-w-[80px] text-center',
+                                    d?.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                                      : d?.status === 'fail' ? 'bg-rose-50 text-rose-700 border-rose-200/70'
+                                        : d?.status === 'checking' ? 'bg-slate-100 text-slate-600 border-slate-200/70'
+                                          : d?.status === 'warn' ? 'bg-amber-50 text-amber-700 border-amber-200/70'
+                                            : 'bg-slate-100 text-slate-500 border-slate-200/70'
+                                  )}>
+                                    {d?.status === 'checking' ? (
+                                      <Loader2 className="h-3 w-3 animate-spin inline" />
+                                    ) : d?.detail ?? 'Not checked'}
+                                  </span>
+                                  <button
+                                    className="app-nodrag text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 transition"
+                                    onClick={() => void window.electronAPI.openSystemSettings(pane)}
+                                  >
+                                    Open <ExternalLink className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )
+                            })}
+
+                            {/* API */}
+                            <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3">
+                              <Key className="h-4 w-4 text-slate-500 shrink-0" />
+                              <span className="flex-1 text-sm font-medium text-slate-700">API Key</span>
+                              <span className={cn(
+                                'rounded-full border px-2 py-0.5 text-xs font-medium min-w-[80px] text-center',
+                                diagnostics.apiKey?.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                                  : diagnostics.apiKey?.status === 'fail' ? 'bg-rose-50 text-rose-700 border-rose-200/70'
+                                    : diagnostics.apiKey?.status === 'checking' ? 'bg-slate-100 text-slate-600 border-slate-200/70'
+                                      : 'bg-slate-100 text-slate-500 border-slate-200/70'
+                              )}>
+                                {diagnostics.apiKey?.status === 'checking' ? (
+                                  <Loader2 className="h-3 w-3 animate-spin inline" />
+                                ) : diagnostics.apiKey?.detail ?? 'Not checked'}
+                              </span>
+                              <button
+                                className="app-nodrag text-xs text-slate-500 hover:text-slate-700 transition"
+                                onClick={() => setSettingsSection('provider')}
+                              >
+                                Go to Providers
+                              </button>
                             </div>
-                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
-                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Automation</div>
-                              <div className="mt-1 flex items-center gap-2">
-                                {runtimeAutomationPermission === 'granted' ? (
-                                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                                ) : (
-                                  <ShieldAlert className="h-4 w-4 text-amber-600" />
-                                )}
-                                <span
-                                  className={cn(
-                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
-                                    permissionToneClass(runtimeAutomationPermission)
-                                  )}
-                                >
-                                  {permissionLabel(runtimeAutomationPermission)}
-                                </span>
-                              </div>
+                            <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3">
+                              <Wifi className="h-4 w-4 text-slate-500 shrink-0" />
+                              <span className="flex-1 text-sm font-medium text-slate-700">Endpoint Reachable</span>
+                              <span className={cn(
+                                'rounded-full border px-2 py-0.5 text-xs font-medium min-w-[80px] text-center',
+                                diagnostics.endpoint?.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                                  : diagnostics.endpoint?.status === 'fail' ? 'bg-rose-50 text-rose-700 border-rose-200/70'
+                                    : diagnostics.endpoint?.status === 'checking' ? 'bg-slate-100 text-slate-600 border-slate-200/70'
+                                      : 'bg-slate-100 text-slate-500 border-slate-200/70'
+                              )}>
+                                {diagnostics.endpoint?.status === 'checking' ? (
+                                  <Loader2 className="h-3 w-3 animate-spin inline" />
+                                ) : diagnostics.endpoint?.detail ?? 'Not checked'}
+                              </span>
+                              <button
+                                className="app-nodrag text-xs text-slate-500 hover:text-slate-700 transition"
+                                onClick={() => {
+                                  setDiagnostics((prev) => ({ ...prev, endpoint: { status: 'checking' } }))
+                                  void window.electronAPI.apiTest()
+                                    .then((r) => {
+                                      setDiagnostics((prev) => ({
+                                        ...prev,
+                                        endpoint: { status: r.ok ? 'pass' : 'fail', detail: r.ok ? `${r.latencyMs}ms` : r.message }
+                                      }))
+                                    })
+                                    .catch(() => {
+                                      setDiagnostics((prev) => ({
+                                        ...prev,
+                                        endpoint: { status: 'fail', detail: 'Connection failed' }
+                                      }))
+                                    })
+                                }}
+                              >
+                                Test
+                              </button>
                             </div>
-                            <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
-                              <div className="text-[11px] uppercase tracking-wide text-slate-400">Capture service</div>
-                              <div className="mt-1 flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    'rounded-full border px-2 py-0.5 text-xs font-medium',
-                                    captureServiceToneClass(runtimeCaptureService)
-                                  )}
-                                >
-                                  {runtimeCaptureService}
+
+                            {/* Codex CLI (only when codex-cli provider) */}
+                            {settings.chatProvider === 'codex-cli' && (
+                              <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3">
+                                <Terminal className="h-4 w-4 text-slate-500 shrink-0" />
+                                <span className="flex-1 text-sm font-medium text-slate-700">Codex CLI</span>
+                                <span className={cn(
+                                  'rounded-full border px-2 py-0.5 text-xs font-medium min-w-[80px] text-center',
+                                  diagnostics.codexCli?.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                                    : diagnostics.codexCli?.status === 'fail' ? 'bg-rose-50 text-rose-700 border-rose-200/70'
+                                      : diagnostics.codexCli?.status === 'checking' ? 'bg-slate-100 text-slate-600 border-slate-200/70'
+                                        : 'bg-slate-100 text-slate-500 border-slate-200/70'
+                                )}>
+                                  {diagnostics.codexCli?.status === 'checking' ? (
+                                    <Loader2 className="h-3 w-3 animate-spin inline" />
+                                  ) : diagnostics.codexCli?.detail ?? 'Not checked'}
                                 </span>
                               </div>
+                            )}
+
+                            {/* Capture Service */}
+                            <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3">
+                              <Sparkles className="h-4 w-4 text-slate-500 shrink-0" />
+                              <span className="flex-1 text-sm font-medium text-slate-700">Capture Service</span>
+                              <span className={cn(
+                                'rounded-full border px-2 py-0.5 text-xs font-medium min-w-[80px] text-center',
+                                captureServiceToneClass(runtimeCaptureService)
+                              )}>
+                                {runtimeCaptureService}
+                              </span>
                             </div>
                           </div>
                           <div className="mt-3 text-xs text-slate-500">
-                            Last checked: {formatRelativeTime(runtimeStatus?.lastCheckedAt)}
+                            Last checked: {formatRelativeTime(diagnosticsLastRunAt ?? runtimeStatus?.lastCheckedAt)}
                           </div>
-                          {(screenPermissionNeedsRequest || screenPermissionNeedsSettings) && (
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              {screenPermissionNeedsRequest && (
-                                <button
-                                  onClick={() => void requestScreenPermission()}
-                                  disabled={isRequestingScreenPermission}
-                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-[var(--ui-accent)] px-3 py-1.5 text-xs font-medium text-[var(--ui-accent-contrast)] hover:bg-[var(--ui-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition"
-                                >
-                                  {isRequestingScreenPermission ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      Requesting
-                                    </>
-                                  ) : (
-                                    'Request access'
-                                  )}
-                                </button>
-                              )}
-                              {screenPermissionNeedsSettings && (
-                                <button
-                                  onClick={() => void openScreenPermissionSettings()}
-                                  disabled={isOpeningScreenSettings}
-                                  className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                                >
-                                  {isOpeningScreenSettings ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      Opening settings
-                                    </>
-                                  ) : (
-                                    'Open System Settings'
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          )}
                         </div>
 
                         <div className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-sm text-slate-600">
@@ -2956,7 +3081,9 @@ export function MainAppShell() {
                     {statusMessage
                       ? statusMessage
                       : settingsSection === 'general'
-                        ? `Last status check: ${formatRelativeTime(runtimeStatus?.lastCheckedAt)}`
+                        ? diagnosticsLastRunAt
+                          ? `Last checked: ${formatRelativeTime(diagnosticsLastRunAt)}`
+                          : `Last checked: ${formatRelativeTime(runtimeStatus?.lastCheckedAt)}`
                         : settingsSection === 'provider' && providerLastCheckedAt
                           ? `Provider health checked ${formatRelativeTime(providerLastCheckedAt)}`
                           : isSavingSettings
@@ -2974,20 +3101,30 @@ export function MainAppShell() {
                       Close
                     </button>
                     {settingsSection === 'general' && (
-                      <button
-                        onClick={() => void runRuntimeStatusCheck()}
-                        disabled={isCheckingRuntimeStatus}
-                        className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                      >
-                        {isCheckingRuntimeStatus ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Checking...
-                          </>
-                        ) : (
-                          'Run status check'
-                        )}
-                      </button>
+                      <>
+                        <button
+                          onClick={copyDiagnosticReport}
+                          disabled={!diagnosticsLastRunAt}
+                          className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                        >
+                          <ClipboardCopy className="h-4 w-4" />
+                          Copy Report
+                        </button>
+                        <button
+                          onClick={() => void runAllDiagnostics()}
+                          disabled={isRunningAllDiagnostics}
+                          className="app-nodrag inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200/80 shadow-sm px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                        >
+                          {isRunningAllDiagnostics ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Checking...
+                            </>
+                          ) : (
+                            'Run All Checks'
+                          )}
+                        </button>
+                      </>
                     )}
                     {settingsSection === 'provider' && (
                       <button
@@ -3008,7 +3145,7 @@ export function MainAppShell() {
                         )}
                       </button>
                     )}
-                    {settingsSection !== 'storage' && (
+                    {settingsSection !== 'storage' && settingsSection !== 'general' && (
                       <button
                         onClick={saveSettings}
                         disabled={!canSave || isSavingSettings || !isDirty || isLoadingSettings}
@@ -3199,7 +3336,34 @@ export function MainAppShell() {
                               <div ref={contextModalScrollRef} className="min-h-0 flex-1 overflow-y-auto">
                                 <div className="p-4 space-y-4">
                                 <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                                  {activeScreenshots.length > 0 && (
+                                  <button
+                                    className="w-full px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent)] focus-visible:ring-inset"
+                                    onClick={() => toggleContextModalSection('screenshot')}
+                                    aria-expanded={contextModalSections.screenshot}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Screenshot</div>
+                                      {selectedScreenshot && (
+                                        <div className="text-[11px] text-slate-400 tabular-nums truncate">
+                                          {selectedScreenshot.displayId || `Display ${selectedScreenshotIndex + 1}`} · {selectedScreenshot.width}×{selectedScreenshot.height}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <ChevronDown className={cn('h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200', contextModalSections.screenshot && 'rotate-180')} />
+                                  </button>
+
+                                  <AnimatePresence initial={false}>
+                                  {contextModalSections.screenshot && (
+                                    <motion.div
+                                      key="screenshot-body"
+                                      initial={SECTION_INITIAL}
+                                      animate={SECTION_ANIMATE}
+                                      exit={SECTION_INITIAL}
+                                      transition={SECTION_COLLAPSE_TRANSITION}
+                                      onAnimationComplete={() => updateContextModalScrollFades()}
+                                      className="overflow-hidden"
+                                    >
+                                  {activeScreenshots.length > 1 && (
                                     <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center gap-2 flex-wrap">
                                       {activeScreenshots.map((asset, idx) => (
                                         <button
@@ -3260,37 +3424,97 @@ export function MainAppShell() {
                                       </div>
                                     </div>
                                   )}
-                                </div>
-
-                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4 text-sm text-slate-700 space-y-1">
-                                  <div className="tabular-nums">
-                                    <span className="text-slate-400">Captured:</span>{' '}
-                                    {activeRecord ? formatTime(activeRecord.timestamp) : '—'}
-                                  </div>
-                                  <div className="break-all">
-                                    <span className="text-slate-400">Active URL:</span>{' '}
-                                    {activeMetadata?.activeUrl ? activeMetadata.activeUrl : '—'}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm p-4">
-                                  <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                                    Summary
-                                  </div>
-                                  <div className="mt-2 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
-                                    {activeSummaryText || 'No summary extracted yet for this capture.'}
-                                  </div>
+                                    </motion.div>
+                                  )}
+                                  </AnimatePresence>
                                 </div>
 
                                 <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                                  <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
-                                    <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                                      Candidates
+                                  <button
+                                    className="w-full px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent)] focus-visible:ring-inset"
+                                    onClick={() => toggleContextModalSection('meta')}
+                                    aria-expanded={contextModalSections.meta}
+                                  >
+                                    <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Info</div>
+                                    <ChevronDown className={cn('h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200', contextModalSections.meta && 'rotate-180')} />
+                                  </button>
+                                  <AnimatePresence initial={false}>
+                                  {contextModalSections.meta && (
+                                    <motion.div
+                                      key="meta-body"
+                                      initial={SECTION_INITIAL}
+                                      animate={SECTION_ANIMATE}
+                                      exit={SECTION_INITIAL}
+                                      transition={SECTION_COLLAPSE_TRANSITION}
+                                      onAnimationComplete={() => updateContextModalScrollFades()}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="px-4 pb-4 text-sm text-slate-700 space-y-1">
+                                        <div className="tabular-nums">
+                                          <span className="text-slate-400">Captured:</span>{' '}
+                                          {activeRecord ? formatTime(activeRecord.timestamp) : '—'}
+                                        </div>
+                                        <div className="break-all">
+                                          <span className="text-slate-400">Active URL:</span>{' '}
+                                          {activeMetadata?.activeUrl ? activeMetadata.activeUrl : '—'}
+                                        </div>
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                  </AnimatePresence>
+                                </div>
+
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                  <button
+                                    className="w-full px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent)] focus-visible:ring-inset"
+                                    onClick={() => toggleContextModalSection('summary')}
+                                    aria-expanded={contextModalSections.summary}
+                                  >
+                                    <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Summary</div>
+                                    <ChevronDown className={cn('h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200', contextModalSections.summary && 'rotate-180')} />
+                                  </button>
+                                  <AnimatePresence initial={false}>
+                                  {contextModalSections.summary && (
+                                    <motion.div
+                                      key="summary-body"
+                                      initial={SECTION_INITIAL}
+                                      animate={SECTION_ANIMATE}
+                                      exit={SECTION_INITIAL}
+                                      transition={SECTION_COLLAPSE_TRANSITION}
+                                      onAnimationComplete={() => updateContextModalScrollFades()}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="px-4 pb-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+                                        {activeSummaryText || 'No summary extracted yet for this capture.'}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                  </AnimatePresence>
+                                </div>
+
+                                <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
+                                  <button
+                                    className="w-full px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent)] focus-visible:ring-inset"
+                                    onClick={() => toggleContextModalSection('candidates')}
+                                    aria-expanded={contextModalSections.candidates}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Candidates</div>
+                                      <div className="text-xs text-slate-400 tabular-nums">{activeMemoryCandidates.length}</div>
                                     </div>
-                                    <div className="text-xs text-slate-400 tabular-nums">
-                                      {activeMemoryCandidates.length}
-                                    </div>
-                                  </div>
+                                    <ChevronDown className={cn('h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200', contextModalSections.candidates && 'rotate-180')} />
+                                  </button>
+                                  <AnimatePresence initial={false}>
+                                  {contextModalSections.candidates && (
+                                    <motion.div
+                                      key="candidates-body"
+                                      initial={SECTION_INITIAL}
+                                      animate={SECTION_ANIMATE}
+                                      exit={SECTION_INITIAL}
+                                      transition={SECTION_COLLAPSE_TRANSITION}
+                                      onAnimationComplete={() => updateContextModalScrollFades()}
+                                      className="overflow-hidden"
+                                    >
                                   {activeMemoryCandidates.length === 0 ? (
                                     <div className="px-4 py-3 text-sm text-slate-500">
                                       No candidate extracted for this capture.
@@ -3374,20 +3598,35 @@ export function MainAppShell() {
                                       ))}
                                     </div>
                                   )}
+                                    </motion.div>
+                                  )}
+                                  </AnimatePresence>
                                 </div>
 
                                 {activeMetadata &&
                                   (activeMetadata.tabs.length > 0 || activeMetadata.browserSessions.length > 0) && (
                                   <div className="rounded-3xl bg-white/80 border border-slate-200/70 shadow-sm overflow-hidden">
-                                    <div className="px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between">
-                                      <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                                        Browser tabs
+                                    <button
+                                      className="w-full px-4 py-3 border-b border-slate-200/60 bg-white/60 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-accent)] focus-visible:ring-inset"
+                                      onClick={() => toggleContextModalSection('browserTabs')}
+                                      aria-expanded={contextModalSections.browserTabs}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Browser tabs</div>
+                                        <div className="text-xs text-slate-400 tabular-nums">{activeMetadata.tabs.length}</div>
                                       </div>
-                                      <div className="text-xs text-slate-400 tabular-nums">
-                                        {activeMetadata.tabs.length}
-                                      </div>
-                                    </div>
-                                    <div className="max-h-64 overflow-y-auto">
+                                      <ChevronDown className={cn('h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform duration-200', contextModalSections.browserTabs && 'rotate-180')} />
+                                    </button>
+                                    <AnimatePresence initial={false}>
+                                    {contextModalSections.browserTabs && (
+                                      <motion.div
+                                        key="browser-tabs-body"
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                                        className="overflow-hidden"
+                                      >
                                       {activeMetadata.browserSessions.length > 0 ? (
                                         <div className="divide-y divide-slate-200/50">
                                           {activeMetadata.browserSessions.map((session, sessionIdx) => (
@@ -3440,7 +3679,9 @@ export function MainAppShell() {
                                           </div>
                                         ))
                                       )}
-                                    </div>
+                                      </motion.div>
+                                    )}
+                                    </AnimatePresence>
                                   </div>
                                 )}
                               </div>
@@ -3497,16 +3738,18 @@ export function MainAppShell() {
                   {agentAction.pendingAction && agentAction.pendingAction.action && (
                     <div className="mr-auto max-w-[85%]">
                       <ActionReviewCard
+                        key={agentAction.pendingAction.actionId}
                         action={agentAction.pendingAction.action}
                         requestId={agentAction.pendingAction.requestId}
                         stage={agentAction.pendingAction.stage}
                         validation={agentAction.pendingAction.validation}
                         result={agentAction.pendingAction.result}
                         error={agentAction.pendingAction.error}
-                        onConfirm={() =>
+                        onConfirm={(edits) =>
                           agentAction.confirm(
                             agentAction.pendingAction!.requestId,
-                            agentAction.pendingAction!.actionId
+                            agentAction.pendingAction!.actionId,
+                            edits
                           )
                         }
                         onCancel={() =>

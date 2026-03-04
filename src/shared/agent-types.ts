@@ -21,6 +21,15 @@ export interface AgentActionPlan {
   actions: AgentAction[]
 }
 
+// ── Action edits (user modifications before confirm) ──
+
+export interface AgentActionEdits {
+  title?: string
+  notes?: string
+  dueAt?: string | null // null = clear the due date
+  listName?: string
+}
+
 // ── Validation ──
 
 export interface ValidationIssue {

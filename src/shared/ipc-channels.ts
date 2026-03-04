@@ -32,5 +32,7 @@ export const IPC = {
   AGENT_START: 'agent:start',
   AGENT_CONFIRM: 'agent:confirm',
   AGENT_STATUS_PUSH: 'agent:status-push',
-  AGENT_PERMISSION_PROBE: 'agent:permission-probe'
+  AGENT_PERMISSION_PROBE: 'agent:permission-probe',
+  DIAGNOSTICS_CHECK_CODEX_CLI: 'diagnostics:check-codex-cli',
+  DIAGNOSTICS_OPEN_SYSTEM_SETTINGS: 'diagnostics:open-system-settings'
 } as const

@@ -1,8 +1,9 @@
-import { ipcMain, clipboard } from 'electron'
+import { execFile } from 'child_process'
+import { ipcMain, clipboard, shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import { is } from '@electron-toolkit/utils'
-import { AppSettings, CaptureServiceStatus, ChatMessage } from '@shared/types'
-import type { AgentActionPlan } from '@shared/agent-types'
+import { AppSettings, CaptureServiceStatus, ChatMessage, CodexCliDiagnosticResult } from '@shared/types'
+import type { AgentActionEdits, AgentActionPlan } from '@shared/agent-types'
 import { startAgentPipeline, confirmAgentAction } from './agent-pipeline'
 import { probeReminderPermission } from './agent-validator'
 import { collapsePanel, enterPanelDetailView, exitPanelDetailView, expandPanel, hidePanel } from './panel-window'
@@ -188,14 +189,51 @@ export function registerIpcHandlers(actions: IpcHandlerActions): void {
 
   ipcMain.handle(
     IPC.AGENT_CONFIRM,
-    async (_event, payload: { requestId: string; actionId: string; confirmed: boolean }) => {
-      confirmAgentAction(payload.requestId, payload.actionId, payload.confirmed)
+    async (_event, payload: { requestId: string; actionId: string; confirmed: boolean; edits?: AgentActionEdits }) => {
+      confirmAgentAction(payload.requestId, payload.actionId, payload.confirmed, payload.edits)
       return { ok: true }
     }
   )
 
   ipcMain.handle(IPC.AGENT_PERMISSION_PROBE, async () => {
     return probeReminderPermission()
+  })
+
+  // ── Diagnostics handlers ──
+
+  ipcMain.handle(IPC.DIAGNOSTICS_CHECK_CODEX_CLI, async (): Promise<CodexCliDiagnosticResult> => {
+    return new Promise((resolve) => {
+      execFile(
+        '/bin/zsh',
+        ['-l', '-c', 'which codex && codex --version'],
+        { timeout: 5000 },
+        (error, stdout, stderr) => {
+          if (error) {
+            resolve({ available: false, error: `${error.message || ''} ${stderr || ''}`.trim() })
+            return
+          }
+          const lines = String(stdout || '').trim().split('\n')
+          const path = lines[0]?.trim() || undefined
+          const version = lines[1]?.trim() || undefined
+          resolve({ available: true, path, version })
+        }
+      )
+    })
+  })
+
+  ipcMain.handle(IPC.DIAGNOSTICS_OPEN_SYSTEM_SETTINGS, async (_event, pane: unknown) => {
+    if (typeof pane !== 'string') return { ok: false, error: 'Invalid pane parameter' }
+    const paneUrls: Record<string, string> = {
+      screenRecording: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+      automation: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'
+    }
+    const url = paneUrls[pane]
+    if (url) {
+      await shell.openExternal(url)
+      return { ok: true, pane }
+    }
+    return { ok: false, error: `Unknown pane: ${pane}` }
   })
 
   console.log('[IPC] Handlers registered')

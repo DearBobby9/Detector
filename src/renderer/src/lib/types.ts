@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   ChatMessage,
+  CodexCliDiagnosticResult,
   DetectionResult,
   HistoryRecord,
   MemoryItem,
@@ -11,7 +12,7 @@ import type {
   StorageLimitUpdateResult,
   StorageUsageSummary
 } from '@shared/types'
-import type { AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
+import type { AgentActionEdits, AgentActionPlan, AgentPermissionProbe, AgentStatusPush } from '@shared/agent-types'
 
 export type PanelState =
   | { status: 'hidden' }
@@ -56,9 +57,11 @@ export interface ElectronAPI {
   }) => Promise<{ ok: boolean; path?: string; message?: string; historyCount?: number; memoryCount?: number }>
   debugReprocessDay: (payload: { day: string }) => Promise<{ ok: boolean; message: string; count?: number }>
   agentStart: (plan: AgentActionPlan) => Promise<{ ok: boolean }>
-  agentConfirm: (payload: { requestId: string; actionId: string; confirmed: boolean }) => Promise<{ ok: boolean }>
+  agentConfirm: (payload: { requestId: string; actionId: string; confirmed: boolean; edits?: AgentActionEdits }) => Promise<{ ok: boolean }>
   onAgentStatusPush: (cb: (status: AgentStatusPush) => void) => () => void
   agentPermissionProbe: () => Promise<AgentPermissionProbe>
+  checkCodexCli: () => Promise<CodexCliDiagnosticResult>
+  openSystemSettings: (pane: string) => Promise<{ ok: boolean; pane?: string; error?: string }>
 }
 
 declare global {
