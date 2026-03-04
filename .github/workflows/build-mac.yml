@@ -16,6 +16,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write        # Required to create GitHub Releases
+
 jobs:
   build:
     name: Build (macOS arm64)
